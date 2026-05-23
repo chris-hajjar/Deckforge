@@ -10,7 +10,7 @@ but Zod-validated, so it is **robust and customizable at once** — bad input is
 rejected with a clear message, never written.
 
 ```
-agent → friendly tool → deck.json (Zod-validated tree) → src/App.jsx → Vite/Spectacle
+agent → friendly tool → deck.json (Zod-validated tree) → presentation.html (Reveal.js, no server needed)
 ```
 
 ## Why this shape
@@ -69,7 +69,7 @@ The second arg is the deck project directory. Restart the client.
 **Slides:** `create_slide`, `delete_slide`, `move_slide`, `set_slide_layout`, `set_slide_transition`
 **Elements:** `add_element`, `edit_element`, `delete_element`, `set_element_style`, `set_element_animation`
 **Theme:** `set_theme`, `set_theme_color`
-**Build:** `render`, `start_dev_server`, `stop_dev_server`, `export_pdf`
+**Build:** `render`, `open_presentation`, `export_pdf`
 
 ## Element kinds
 

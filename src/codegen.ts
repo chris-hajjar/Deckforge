@@ -1,155 +1,195 @@
 /**
- * codegen.ts — render a validated Deck into src/App.jsx.
- * Walks the element tree; emits Spectacle JSX. Pure functions, no I/O.
+ * codegen.ts — render a validated Deck into a self-contained presentation.html.
+ * Uses Reveal.js via CDN. No build step needed — just open the file.
  */
 import type { Deck, Slide, Element } from "./model.js";
 
-function jsStr(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
-}
-function tpl(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
-function styleProp(style?: Record<string, unknown>): string {
+const UNITLESS = new Set(["fontWeight", "opacity", "zIndex", "lineHeight"]);
+
+function toCss(key: string, val: unknown): string {
+  const prop = key.replace(/([A-Z])/g, "-$1").toLowerCase();
+  const cssVal =
+    typeof val === "number" && !UNITLESS.has(key) ? `${val}px` : String(val);
+  return `${prop}: ${cssVal}`;
+}
+
+function styleAttr(style?: Record<string, unknown>): string {
   if (!style || Object.keys(style).length === 0) return "";
-  const entries = Object.entries(style).map(([k, v]) => {
-    const val = typeof v === "number" ? `${v}` : `"${jsStr(String(v))}"`;
-    return `${k}: ${val}`;
-  });
-  return ` style={{ ${entries.join(", ")} }}`;
+  const css = Object.entries(style)
+    .map(([k, v]) => toCss(k, v))
+    .join("; ");
+  return ` style="${esc(css)}"`;
 }
 
-// Wrap a rendered element in <Appear> if animation.appear is set.
-function maybeAppear(el: Element, inner: string, indent: string): string {
+function fragAttrs(el: Element): string {
   const anim = (el as any).animation;
-  if (anim?.appear) {
-    const prio = anim.priority !== undefined ? ` priority={${anim.priority}}` : "";
-    return `${indent}<Appear${prio}>\n${inner}\n${indent}</Appear>`;
-  }
-  return inner;
+  if (!anim?.appear) return "";
+  const idx =
+    anim.priority !== undefined
+      ? ` data-fragment-index="${anim.priority}"`
+      : "";
+  return ` class="fragment"${idx}`;
 }
 
 function renderElement(el: Element, indent: string): string {
-  const s = styleProp((el as any).style);
-  let body: string;
+  const s = styleAttr((el as any).style);
+  const fa = fragAttrs(el);
 
   switch ((el as any).kind) {
     case "heading":
-      body = `${indent}<Heading${s}>${jsStr((el as any).text)}</Heading>`;
-      break;
+      return `${indent}<h2${s}${fa}>${esc((el as any).text)}</h2>`;
+
     case "text":
-      body = `${indent}<Text${s}>${jsStr((el as any).text)}</Text>`;
-      break;
+      return `${indent}<p${s}${fa}>${esc((el as any).text)}</p>`;
+
     case "list": {
       const e = el as any;
-      const Tag = e.ordered ? "OrderedList" : "UnorderedList";
+      const Tag = e.ordered ? "ol" : "ul";
       const items = e.items
         .map((it: string) => {
-          const li = `<ListItem>${jsStr(it)}</ListItem>`;
-          return e.animateItems
-            ? `${indent}  <Appear>${li}</Appear>`
-            : `${indent}  ${li}`;
+          const f = e.animateItems ? ` class="fragment"` : "";
+          return `${indent}  <li${f}>${esc(it)}</li>`;
         })
         .join("\n");
-      body = `${indent}<${Tag}${s}>\n${items}\n${indent}</${Tag}>`;
-      break;
+      return `${indent}<${Tag}${s}${fa}>\n${items}\n${indent}</${Tag}>`;
     }
+
     case "code": {
       const e = el as any;
-      let hl = "";
-      if (e.highlightRanges?.length) {
-        const r = e.highlightRanges.map((p: number[]) => `[${p[0]}, ${p[1]}]`).join(", ");
-        hl = ` highlightRanges={[${r}]}`;
-      }
-      body = `${indent}<CodePane language="${jsStr(e.language)}"${hl}>\n${indent}  {\`${tpl(e.code)}\`}\n${indent}</CodePane>`;
-      break;
+      return `${indent}<pre${fa}><code class="language-${esc(e.language)}">${esc(e.code)}</code></pre>`;
     }
+
     case "image": {
       const e = el as any;
-      const alt = e.alt ? ` alt="${jsStr(e.alt)}"` : "";
-      body = `${indent}<Image src="${jsStr(e.src)}"${alt}${s} />`;
-      break;
+      const alt = e.alt ? ` alt="${esc(e.alt)}"` : "";
+      return `${indent}<img src="${esc(e.src)}"${alt}${s}${fa} />`;
     }
+
     case "spacer": {
       const e = el as any;
-      const sz = typeof e.size === "number" ? `${e.size}px` : e.size;
-      body = `${indent}<Box style={{ height: "${jsStr(sz)}" }} />`;
-      break;
+      const sz = typeof e.size === "number" ? `${e.size}px` : String(e.size);
+      return `${indent}<div style="height:${esc(sz)}"${fa}></div>`;
     }
+
     case "box": {
       const e = el as any;
-      const just = e.justify ? ` justifyContent="${jsStr(e.justify)}"` : "";
-      const al = e.align ? ` alignItems="${jsStr(e.align)}"` : "";
-      const kids = e.children.map((c: Element) => renderElement(c, indent + "  ")).join("\n");
-      body = `${indent}<FlexBox flexDirection="${e.direction}"${just}${al}${s}>\n${kids}\n${indent}</FlexBox>`;
-      break;
+      const boxStyle: Record<string, unknown> = {
+        display: "flex",
+        flexDirection: e.direction ?? "column",
+        ...(e.justify ? { justifyContent: e.justify } : {}),
+        ...(e.align ? { alignItems: e.align } : {}),
+        ...(e.style ?? {}),
+      };
+      const kids = e.children
+        .map((c: Element) => renderElement(c, indent + "  "))
+        .join("\n");
+      return `${indent}<div${styleAttr(boxStyle)}${fa}>\n${kids}\n${indent}</div>`;
     }
+
     case "columns": {
       const e = el as any;
+      const gap =
+        e.gap != null
+          ? typeof e.gap === "number"
+            ? `${e.gap}px`
+            : String(e.gap)
+          : "2rem";
+      const colPct = `${Math.floor(100 / e.columns.length) - 2}%`;
       const cols = e.columns
         .map((col: Element[]) => {
-          const kids = col.map((c) => renderElement(c, indent + "    ")).join("\n");
-          const w = `${Math.floor(100 / e.columns.length) - 2}%`;
-          return `${indent}  <Box width="${w}">\n${kids}\n${indent}  </Box>`;
+          const kids = col
+            .map((c) => renderElement(c, indent + "    "))
+            .join("\n");
+          return `${indent}  <div style="width:${colPct}">\n${kids}\n${indent}  </div>`;
         })
         .join("\n");
-      const gap = e.gap ? ` style={{ gap: "${typeof e.gap === "number" ? e.gap + "px" : e.gap}" }}` : "";
-      body = `${indent}<FlexBox justifyContent="space-between" alignItems="flex-start"${gap}>\n${cols}\n${indent}</FlexBox>`;
-      break;
+      return `${indent}<div style="display:flex;justify-content:space-between;gap:${esc(gap)}"${fa}>\n${cols}\n${indent}</div>`;
     }
+
     default:
       throw new Error(`Unknown element kind: ${(el as any).kind}`);
-  }
-
-  return maybeAppear(el, body, indent);
-}
-
-function layoutFlex(layout: string): { justify: string; align: string } {
-  switch (layout) {
-    case "top":
-      return { justify: "flex-start", align: "center" };
-    case "left":
-      return { justify: "center", align: "flex-start" };
-    case "center":
-    default:
-      return { justify: "center", align: "center" };
   }
 }
 
 function renderSlide(slide: Slide): string {
-  const { justify, align } = layoutFlex(slide.layout);
   const trans =
     slide.transition && slide.transition !== "none"
-      ? ` transition={{ from: { opacity: 0 }, enter: { opacity: 1 } }}`
+      ? ` data-transition="${slide.transition}"`
       : "";
   const bg = slide.backgroundColor
-    ? ` backgroundColor="${jsStr(slide.backgroundColor)}"`
+    ? ` data-background-color="${esc(slide.backgroundColor)}"`
     : "";
-  const els = slide.elements.map((e) => renderElement(e, "          ")).join("\n");
-  return `      <Slide${bg}${trans}>
-        <FlexBox height="100%" flexDirection="column" justifyContent="${justify}" alignItems="${align}">
-${els}
-        </FlexBox>
-      </Slide>`;
+  const layoutStyle =
+    slide.layout === "top"
+      ? ` style="top:0;padding-top:2rem"`
+      : slide.layout === "left"
+      ? ` style="text-align:left"`
+      : "";
+
+  const els = slide.elements.map((e) => renderElement(e, "      ")).join("\n");
+  return `    <section${bg}${trans}${layoutStyle}>\n${els}\n    </section>`;
 }
 
-export function renderAppJsx(deck: Deck): string {
-  const themeJson = JSON.stringify(deck.theme, null, 2);
+export function renderPresentation(deck: Deck): string {
+  const colors = deck.theme.colors ?? {};
+  const fonts = deck.theme.fonts ?? {};
+  const sizes = deck.theme.fontSizes ?? {};
+
+  const bg = colors.tertiary ?? "#0f1419";
+  const fg = colors.primary ?? "#e8e6e3";
+  const accent = colors.secondary ?? "#7dd3fc";
+  const headerFont = fonts.header ?? '"Georgia", serif';
+  const textFont = fonts.text ?? '"Georgia", serif';
+  const h1 = sizes.h1 ?? "3.5rem";
+  const h2 = sizes.h2 ?? "2.4rem";
+  const text = sizes.text ?? "1.4rem";
+
   const slides = deck.slides.map(renderSlide).join("\n\n");
-  return `import {
-  Deck, Slide, Heading, Text, UnorderedList, OrderedList, ListItem,
-  CodePane, Appear, FlexBox, Box, Image,
-} from "spectacle"
 
-const theme = ${themeJson}
-
-export default function App() {
-  return (
-    <Deck theme={theme}>
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Presentation</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.2.1/dist/reveal.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.2.1/plugin/highlight/monokai.css" />
+  <style>
+    :root {
+      --r-background-color: ${bg};
+      --r-main-color: ${fg};
+      --r-heading-color: ${fg};
+      --r-link-color: ${accent};
+      --r-main-font: ${textFont};
+      --r-heading-font: ${headerFont};
+      --r-heading1-size: ${h1};
+      --r-heading2-size: ${h2};
+      --r-main-font-size: ${text};
+    }
+    .reveal h2 { color: ${fg}; }
+    .reveal a  { color: ${accent}; }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
 ${slides}
-    </Deck>
-  )
-}
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.2.1/dist/reveal.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.2.1/plugin/highlight/highlight.js"></script>
+  <script>
+    Reveal.initialize({ hash: true, plugins: [RevealHighlight] });
+  </script>
+</body>
+</html>
 `;
 }
