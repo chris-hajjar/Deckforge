@@ -1,0 +1,187 @@
+/**
+ * App — Deckforge canvas shell: slide rail | 16:9 canvas | inspector.
+ * All state lives on the server; this app renders it and emits patches.
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Operation } from "fast-json-patch";
+import { findNode } from "@deckforge/schema";
+import { solveSlide } from "@deckforge/layout";
+import { SlideCanvas } from "./SlideCanvas.js";
+import { Inspector } from "./Inspector.js";
+import { useDeck } from "./useDeck.js";
+
+export function App() {
+  const { state, sendPatches } = useDeck();
+  const [slideIndex, setSlideIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.6);
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const update = () =>
+      setScale(Math.min((el.clientWidth - 48) / 1280, (el.clientHeight - 80) / 720));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [state != null]);
+
+  const warnings = useMemo(() => {
+    if (!state) return [];
+    const slide = state.deck.slides[slideIndex];
+    return slide ? solveSlide(slide, state.tokens).warnings : [];
+  }, [state, slideIndex]);
+
+  if (!state) return <div className="boot">Connecting to Deckforge…</div>;
+  const { deck, tokens, rev, lastCorrections, lastSource, connected } = state;
+  const safeIndex = Math.min(slideIndex, deck.slides.length - 1);
+  const slide = deck.slides[safeIndex];
+
+  const editText = (nodeId: string, text: string) => {
+    const visit = findNode(deck, nodeId);
+    if (visit) sendPatches([{ op: "replace", path: `${visit.pointer}/text`, value: text }]);
+  };
+
+  const addSlide = () => {
+    const id = `slide-${Math.random().toString(36).slice(2, 8)}`;
+    sendPatches([
+      {
+        op: "add",
+        path: "/slides/-",
+        value: {
+          id,
+          root: {
+            id: `${id}-root`,
+            type: "column",
+            style: { gap: 24 },
+            children: [{ id: `${id}-h`, type: "heading", text: "New slide", level: 2 }],
+          },
+        },
+      } as Operation,
+    ]);
+    setSlideIndex(deck.slides.length);
+  };
+
+  const deleteSlide = (i: number) => {
+    if (deck.slides.length <= 1) return;
+    sendPatches([{ op: "remove", path: `/slides/${i}` } as Operation]);
+    setSlideIndex(Math.max(0, i - 1));
+    setSelectedId(null);
+  };
+
+  const moveSlide = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= deck.slides.length) return;
+    sendPatches([
+      { op: "move", from: `/slides/${i}`, path: `/slides/${j}` } as unknown as Operation,
+    ]);
+    setSlideIndex(j);
+  };
+
+  return (
+    <div className="shell">
+      <header>
+        <span className="logo">⚒ Deckforge</span>
+        <input
+          className="deck-title"
+          key={deck.title}
+          defaultValue={deck.title}
+          onBlur={(e) =>
+            e.target.value !== deck.title &&
+            sendPatches([{ op: "replace", path: "/title", value: e.target.value }])
+          }
+        />
+        <div className="theme-picker">
+          {["corporate-bold", "minimalist-dark"].map((t) => (
+            <button
+              key={t}
+              className={deck.theme.base === t ? "active" : ""}
+              onClick={() =>
+                sendPatches([
+                  { op: "replace", path: "/theme", value: { ...deck.theme, base: t } },
+                ])
+              }
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        <span className={`conn ${connected ? "on" : "off"}`}>
+          {connected ? `live · rev ${rev}` : "reconnecting…"}
+        </span>
+        <a className="export" href="/api/export.pptx">
+          Export .pptx
+        </a>
+      </header>
+
+      <div className="body">
+        <nav className="rail">
+          {deck.slides.map((s, i) => (
+            <div
+              key={s.id}
+              className={`thumb ${i === safeIndex ? "active" : ""}`}
+              onClick={() => {
+                setSlideIndex(i);
+                setSelectedId(null);
+              }}
+            >
+              <SlideCanvas deck={deck} slide={s} tokens={tokens} scale={0.117} interactive={false} />
+              <div className="thumb-meta">
+                <span>
+                  {i + 1}. {s.name ?? s.id}
+                </span>
+                <span className="thumb-actions">
+                  <button onClick={(e) => (e.stopPropagation(), moveSlide(i, -1))}>↑</button>
+                  <button onClick={(e) => (e.stopPropagation(), moveSlide(i, 1))}>↓</button>
+                  <button onClick={(e) => (e.stopPropagation(), deleteSlide(i))}>✕</button>
+                </span>
+              </div>
+            </div>
+          ))}
+          <button className="add-slide" onClick={addSlide}>
+            + Slide
+          </button>
+        </nav>
+
+        <main ref={mainRef}>
+          <SlideCanvas
+            deck={deck}
+            slide={slide}
+            tokens={tokens}
+            scale={scale}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onEditText={editText}
+          />
+          <div className="statusbar">
+            {warnings.map((w, i) => (
+              <span key={i} className="warn">
+                ⚠ {w}
+              </span>
+            ))}
+            {lastCorrections.length > 0 && (
+              <span className="corrections">
+                brand engine corrected {lastCorrections.length} value
+                {lastCorrections.length > 1 ? "s" : ""} ({lastSource}):{" "}
+                {lastCorrections
+                  .map((c) => `${c.field} ${JSON.stringify(c.from)}→${JSON.stringify(c.to)}`)
+                  .join(", ")}
+              </span>
+            )}
+          </div>
+        </main>
+
+        <Inspector
+          deck={deck}
+          tokens={tokens}
+          slideIndex={safeIndex}
+          selectedId={selectedId}
+          sendPatches={sendPatches}
+          onDeselect={() => setSelectedId(null)}
+        />
+      </div>
+    </div>
+  );
+}
