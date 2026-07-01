@@ -20,8 +20,10 @@ export const COLOR_ROLES = [
 ] as const;
 export type ColorRole = (typeof COLOR_ROLES)[number];
 
-/** Font stacks are constrained to metrics-known families (see docs/V2-ARCHITECTURE.md, Pillar A). */
-export const FONT_IDS = ["sans", "serif"] as const;
+/** Font stacks are constrained to metrics-known families (see docs/V2-ARCHITECTURE.md, Pillar A).
+ * All three map to fonts built into both PowerPoint and Google Slides
+ * (Arial, Georgia, Courier New). */
+export const FONT_IDS = ["sans", "serif", "mono"] as const;
 export type FontId = (typeof FONT_IDS)[number];
 
 export const FontIdSchema = z.enum(FONT_IDS);

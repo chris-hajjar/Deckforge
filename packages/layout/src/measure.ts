@@ -9,6 +9,8 @@ import sansRegular from "./metrics/sans-regular.json" with { type: "json" };
 import sansBold from "./metrics/sans-bold.json" with { type: "json" };
 import serifRegular from "./metrics/serif-regular.json" with { type: "json" };
 import serifBold from "./metrics/serif-bold.json" with { type: "json" };
+import monoRegular from "./metrics/mono-regular.json" with { type: "json" };
+import monoBold from "./metrics/mono-bold.json" with { type: "json" };
 
 interface MetricsTable {
   family: string;
@@ -25,6 +27,8 @@ const TABLES: Record<string, MetricsTable> = {
   "sans-bold": sansBold as MetricsTable,
   "serif-regular": serifRegular as MetricsTable,
   "serif-bold": serifBold as MetricsTable,
+  "mono-regular": monoRegular as MetricsTable,
+  "mono-bold": monoBold as MetricsTable,
 };
 
 export function fontFamily(fontId: FontId): string {

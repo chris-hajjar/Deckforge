@@ -2,20 +2,21 @@
  * solve.ts — the deterministic layout solver.
  *
  * Walks a slide's tree and resolves it into absolute primitive boxes on the
- * 1280×720 canvas (see types.ts). Flexbox-lite rules:
+ * 1280×720 canvas (see types.ts). Two layers:
  *
- *   column: children take full inner width; height is intrinsic (measured),
- *           `grow` children share leftover space; `justify` distributes slack.
- *   row:    widths split by `weight` (or pinned by `widthPct`); `align`
- *           controls cross-axis (default stretch → equal-height cards).
+ *   flow:     column/row flexbox-lite (intrinsic heights, weights, grow,
+ *             justify/align), exactly as v2.0;
+ *   overlays: freeform elements with absolute frames, painted on top in
+ *             order (z 200+), Google-Slides style.
  *
- * Text that lands in a box shorter than its measured height autoshrinks down
- * the theme's fontSizeScale (PowerPoint-style) until it fits or bottoms out.
+ * Entrance animations are inherited: animating a container animates every
+ * box it produces, so "the group flies in" behaves like Slides.
  */
 import type {
   ColumnNode,
   DeckNode,
   FontId,
+  Gradient,
   RowNode,
   Slide,
   TextStyle,
@@ -26,13 +27,18 @@ import {
   CANVAS_H,
   CANVAS_W,
   type Paragraph,
+  type ResolvedAnim,
   type ResolvedBox,
+  type ResolvedGradient,
   type ResolvedSlide,
+  type ResolvedStroke,
+  type TableBox,
   type TextBox,
 } from "./types.js";
 
 const MIN_FONT_SIZE = 10;
 const CARD_PAD = 24;
+const TABLE_CELL_PAD = 10;
 
 interface Rect {
   x: number;
@@ -46,6 +52,8 @@ interface Ctx {
   boxes: ResolvedBox[];
   warnings: string[];
   seq: number;
+  /** Animation inherited from the nearest animated ancestor. */
+  anim?: ResolvedAnim;
 }
 
 function color(ctx: Ctx, role: string | undefined, fallback: keyof ThemeTokens["colors"]): string {
@@ -53,43 +61,83 @@ function color(ctx: Ctx, role: string | undefined, fallback: keyof ThemeTokens["
   return (role && roles[role]) || roles[fallback];
 }
 
+function gradient(ctx: Ctx, g: Gradient | undefined): ResolvedGradient | undefined {
+  if (!g) return undefined;
+  return {
+    from: color(ctx, g.from, "surface"),
+    to: color(ctx, g.to, "accent"),
+    angle: g.angle ?? 90,
+  };
+}
+
+function stroke(
+  ctx: Ctx,
+  b: { color: string; width: number } | undefined,
+): ResolvedStroke | undefined {
+  if (!b) return undefined;
+  return { color: color(ctx, b.color, "accent"), width: b.width };
+}
+
+function animOf(ctx: Ctx, node: DeckNode): ResolvedAnim | undefined {
+  const a = (node as { animation?: ResolvedAnim }).animation;
+  return a ? { effect: a.effect, direction: a.direction, order: a.order ?? 1, byParagraph: a.byParagraph } : ctx.anim;
+}
+
 interface TextSpec {
   fontId: FontId;
   bold: boolean;
   italic: boolean;
+  underline: boolean;
   size: number;
   color: string;
   align: "left" | "center" | "right";
   lineHeight: number;
+  letterSpacing?: number;
+  uppercase: boolean;
+}
+
+function specFrom(ctx: Ctx, style: TextStyle, defaults: Partial<TextSpec> & { size: number; fontId: FontId }): TextSpec {
+  return {
+    fontId: style.font ?? defaults.fontId,
+    bold: style.bold ?? defaults.bold ?? false,
+    italic: style.italic ?? defaults.italic ?? false,
+    underline: style.underline ?? false,
+    size: style.fontSize ?? defaults.size,
+    color: color(ctx, style.color, "text-primary"),
+    align: style.align ?? defaults.align ?? "left",
+    lineHeight: style.lineHeight ?? defaults.lineHeight ?? 1.35,
+    letterSpacing: style.letterSpacing,
+    uppercase: style.uppercase ?? false,
+  };
 }
 
 function textSpec(ctx: Ctx, node: DeckNode): TextSpec {
   const t = ctx.tokens;
   const style: TextStyle = (node as { style?: TextStyle }).style ?? {};
-  switch (node.type) {
-    case "heading": {
-      const level = (node as { level?: 1 | 2 }).level ?? 1;
-      return {
-        fontId: t.fonts.heading,
-        bold: style.bold ?? true,
-        italic: style.italic ?? false,
-        size: style.fontSize ?? (level === 1 ? t.fontSizes.h1 : t.fontSizes.h2),
-        color: color(ctx, style.color, "text-primary"),
-        align: style.align ?? "left",
-        lineHeight: 1.15,
-      };
-    }
-    default:
-      return {
-        fontId: t.fonts.body,
-        bold: style.bold ?? false,
-        italic: style.italic ?? false,
-        size: style.fontSize ?? t.fontSizes.body,
-        color: color(ctx, style.color, "text-primary"),
-        align: style.align ?? "left",
-        lineHeight: 1.35,
-      };
+  if (node.type === "heading") {
+    const level = (node as { level?: 1 | 2 }).level ?? 1;
+    return specFrom(ctx, style, {
+      fontId: t.fonts.heading,
+      bold: true,
+      size: level === 1 ? t.fontSizes.h1 : t.fontSizes.h2,
+      lineHeight: 1.15,
+    });
   }
+  return specFrom(ctx, style, { fontId: t.fonts.body, size: t.fontSizes.body });
+}
+
+/** Effective per-line advance including letter-spacing. */
+function lineWidth(text: string, spec: TextSpec, size: number): number {
+  const base = measureText(text, spec.fontId, spec.bold, size);
+  return base + (spec.letterSpacing ?? 0) * Math.max(0, text.length - 1);
+}
+
+function wrapSpec(text: string, spec: TextSpec, size: number, maxWidth: number): string[] {
+  const t = spec.uppercase ? text.toUpperCase() : text;
+  // letter-spacing shrinks the effective wrap width proportionally (approx.)
+  const avgCharW = size * 0.5;
+  const factor = spec.letterSpacing ? avgCharW / (avgCharW + spec.letterSpacing) : 1;
+  return wrapText(t, spec.fontId, spec.bold, size, maxWidth * factor);
 }
 
 /** Wrap a text-like node into paragraphs at a given size. */
@@ -102,19 +150,17 @@ function paragraphsFor(
   if (node.type === "bulletList") {
     const indent = size * 1.4;
     return {
-      paragraphs: node.items.map((item) => ({
-        lines: wrapText(item, spec.fontId, spec.bold, size, Math.max(20, width - indent)),
+      paragraphs: node.items.map((item, i) => ({
+        lines: wrapSpec(item, spec, size, Math.max(20, width - indent)),
         bullet: true,
+        marker: node.ordered ? `${i + 1}.` : undefined,
       })),
       paragraphGap: Math.round(size * 0.45),
     };
   }
   const text = (node as { text: string }).text;
   return {
-    paragraphs: [{ lines: wrapText(text, spec.fontId, spec.bold, size, width) }].map((p) => ({
-      ...p,
-      bullet: false,
-    })),
+    paragraphs: [{ lines: wrapSpec(text, spec, size, width), bullet: false }],
     paragraphGap: 0,
   };
 }
@@ -130,6 +176,31 @@ function shrink(ctx: Ctx, size: number): number | null {
   const smaller = scale.filter((s) => s < size);
   const next = smaller.length ? smaller[smaller.length - 1] : null;
   return next !== null && next >= MIN_FONT_SIZE ? next : null;
+}
+
+// ---------- tables ----------
+interface TableMeasure {
+  colW: number[];
+  rowH: number[];
+  size: number;
+}
+
+function measureTable(ctx: Ctx, node: Extract<DeckNode, { type: "table" }>, width: number): TableMeasure {
+  const t = ctx.tokens;
+  const size = node.style?.fontSize ?? t.fontSizes.small;
+  const cols = node.rows[0].length;
+  const weights = node.columns && node.columns.length === cols ? node.columns : Array(cols).fill(1);
+  const wSum = weights.reduce((a: number, b: number) => a + b, 0);
+  const colW = weights.map((w: number) => (w / wSum) * width);
+  const rowH = node.rows.map((row) => {
+    let maxLines = 1;
+    row.forEach((cell, c) => {
+      const lines = wrapText(cell, t.fonts.body, false, size, Math.max(20, colW[c] - TABLE_CELL_PAD * 2));
+      maxLines = Math.max(maxLines, lines.length);
+    });
+    return maxLines * size * 1.35 + TABLE_CELL_PAD * 2;
+  });
+  return { colW, rowH, size };
 }
 
 // ---------- intrinsic heights ----------
@@ -149,15 +220,17 @@ function intrinsicHeight(ctx: Ctx, node: DeckNode, width: number): number {
       const t = ctx.tokens;
       const deltaH = node.delta ? t.fontSizes.small * 1.3 + 4 : 0;
       return (
-        CARD_PAD * 2 +
-        t.fontSizes.metricLabel * 1.3 +
-        8 +
-        t.fontSizes.metricValue * 1.15 +
-        deltaH
+        CARD_PAD * 2 + t.fontSizes.metricLabel * 1.3 + 8 + t.fontSizes.metricValue * 1.15 + deltaH
       );
     }
     case "image":
       return Math.round(width * (9 / 16));
+    case "shape":
+      return node.shape === "line" ? Math.max(4, node.border?.width ?? 2) : Math.round(width * 0.35);
+    case "table": {
+      const m = measureTable(ctx, node, width);
+      return m.rowH.reduce((a, b) => a + b, 0);
+    }
     case "spacer":
       return node.size;
     case "row": {
@@ -206,7 +279,8 @@ function rowChildWidths(ctx: Ctx, row: RowNode, innerW: number): number[] {
 
 // ---------- layout (emit boxes) ----------
 function emitContainerRect(ctx: Ctx, node: RowNode | ColumnNode, rect: Rect, z: number) {
-  if (node.style?.background) {
+  const s = node.style;
+  if (s?.background || s?.gradient || s?.border) {
     ctx.boxes.push({
       kind: "rect",
       id: `box-${ctx.seq++}`,
@@ -216,10 +290,22 @@ function emitContainerRect(ctx: Ctx, node: RowNode | ColumnNode, rect: Rect, z: 
       w: rect.w,
       h: rect.h,
       z,
-      fill: color(ctx, node.style.background, "surface"),
-      radius: node.style.radius ?? 0,
+      anim: animOf(ctx, node),
+      fill: s.gradient ? undefined : color(ctx, s.background, "surface"),
+      gradient: gradient(ctx, s.gradient),
+      stroke: stroke(ctx, s.border),
+      shadow: s.shadow,
+      radius: s.radius ?? 0,
     });
   }
+}
+
+function withAnim<T>(ctx: Ctx, node: DeckNode, fn: () => T): T {
+  const prev = ctx.anim;
+  ctx.anim = animOf(ctx, node);
+  const out = fn();
+  ctx.anim = prev;
+  return out;
 }
 
 function layoutColumn(ctx: Ctx, node: ColumnNode, rect: Rect, z: number) {
@@ -263,9 +349,11 @@ function layoutColumn(ctx: Ctx, node: ColumnNode, rect: Rect, z: number) {
     }
   }
 
-  node.children.forEach((child, i) => {
-    layoutNode(ctx, child, { x: inner.x, y, w: inner.w, h: assigned[i] }, z + 1);
-    y += assigned[i] + between;
+  withAnim(ctx, node, () => {
+    node.children.forEach((child, i) => {
+      layoutNode(ctx, child, { x: inner.x, y, w: inner.w, h: assigned[i] }, z + 1);
+      y += assigned[i] + between;
+    });
   });
 }
 
@@ -281,17 +369,19 @@ function layoutRow(ctx: Ctx, node: RowNode, rect: Rect, z: number) {
   };
   const widths = rowChildWidths(ctx, node, inner.w);
   const align = node.style?.align ?? "stretch";
-  let x = inner.x;
-  node.children.forEach((child, i) => {
-    let h = inner.h;
-    let y = inner.y;
-    if (align !== "stretch") {
-      h = Math.min(inner.h, intrinsicHeight(ctx, child, widths[i]));
-      if (align === "center") y += (inner.h - h) / 2;
-      else if (align === "end") y += inner.h - h;
-    }
-    layoutNode(ctx, child, { x, y, w: widths[i], h }, z + 1);
-    x += widths[i] + gap;
+  withAnim(ctx, node, () => {
+    let x = inner.x;
+    node.children.forEach((child, i) => {
+      let h = inner.h;
+      let y = inner.y;
+      if (align !== "stretch") {
+        h = Math.min(inner.h, intrinsicHeight(ctx, child, widths[i]));
+        if (align === "center") y += (inner.h - h) / 2;
+        else if (align === "end") y += inner.h - h;
+      }
+      layoutNode(ctx, child, { x, y, w: widths[i], h }, z + 1);
+      x += widths[i] + gap;
+    });
   });
 }
 
@@ -314,7 +404,7 @@ function layoutTextLike(ctx: Ctx, node: DeckNode, rect: Rect, z: number) {
   if (size !== spec.size) {
     ctx.warnings.push(`text "${node.id}" autoshrunk ${spec.size}→${size}px to fit`);
   }
-  const box: TextBox = {
+  ctx.boxes.push({
     kind: "text",
     id: `box-${ctx.seq++}`,
     nodeId: node.id,
@@ -323,17 +413,19 @@ function layoutTextLike(ctx: Ctx, node: DeckNode, rect: Rect, z: number) {
     w: rect.w,
     h: rect.h,
     z: z + 100,
+    anim: animOf(ctx, node),
     paragraphs: para.paragraphs,
     fontId: spec.fontId,
     bold: spec.bold,
     italic: spec.italic,
+    underline: spec.underline,
     size,
     lineHeight: spec.lineHeight,
+    letterSpacing: spec.letterSpacing,
     color: spec.color,
     align: spec.align,
     paragraphGap: para.paragraphGap,
-  };
-  ctx.boxes.push(box);
+  });
 }
 
 function layoutMetricCard(
@@ -343,6 +435,7 @@ function layoutMetricCard(
   z: number,
 ) {
   const t = ctx.tokens;
+  const anim = animOf(ctx, node);
   ctx.boxes.push({
     kind: "rect",
     id: `box-${ctx.seq++}`,
@@ -352,6 +445,7 @@ function layoutMetricCard(
     w: rect.w,
     h: rect.h,
     z,
+    anim,
     fill: color(ctx, node.background, "surface"),
     radius: t.radius.md,
   });
@@ -359,25 +453,34 @@ function layoutMetricCard(
   const innerW = rect.w - CARD_PAD * 2;
   let y = rect.y + CARD_PAD;
 
-  const label: TextBox = {
+  const textBox = (
+    text: string,
+    size: number,
+    colorHex: string,
+    bold: boolean,
+    lineHeight: number,
+  ): TextBox => ({
     kind: "text",
     id: `box-${ctx.seq++}`,
     nodeId: node.id,
     x: innerX,
     y,
     w: innerW,
-    h: t.fontSizes.metricLabel * 1.3,
+    h: size * lineHeight,
     z: z + 100,
-    paragraphs: [{ lines: [node.label.toUpperCase()], bullet: false }],
+    anim,
+    paragraphs: [{ lines: [text], bullet: false }],
     fontId: t.fonts.body,
-    bold: false,
+    bold,
     italic: false,
-    size: t.fontSizes.metricLabel,
-    lineHeight: 1.3,
-    color: t.colors["text-secondary"],
+    size,
+    lineHeight,
+    color: colorHex,
     align: "left",
     paragraphGap: 0,
-  };
+  });
+
+  const label = textBox(node.label.toUpperCase(), t.fontSizes.metricLabel, t.colors["text-secondary"], false, 1.3);
   ctx.boxes.push(label);
   y += label.h + 8;
 
@@ -389,49 +492,114 @@ function layoutMetricCard(
   ) {
     valueSize = shrink(ctx, valueSize)!;
   }
-  const value: TextBox = {
-    kind: "text",
-    id: `box-${ctx.seq++}`,
-    nodeId: node.id,
-    x: innerX,
-    y,
-    w: innerW,
-    h: valueSize * 1.15,
-    z: z + 100,
-    paragraphs: [{ lines: [node.value], bullet: false }],
-    fontId: t.fonts.body,
-    bold: true,
-    italic: false,
-    size: valueSize,
-    lineHeight: 1.15,
-    color: t.colors.accent,
-    align: "left",
-    paragraphGap: 0,
-  };
+  const value = textBox(node.value, valueSize, t.colors.accent, true, 1.15);
   ctx.boxes.push(value);
   y += value.h + 4;
 
   if (node.delta) {
+    ctx.boxes.push(textBox(node.delta, t.fontSizes.small, t.colors["text-secondary"], false, 1.3));
+  }
+}
+
+function layoutShape(ctx: Ctx, node: Extract<DeckNode, { type: "shape" }>, rect: Rect, z: number) {
+  const anim = animOf(ctx, node);
+  const isLine = node.shape === "line";
+  ctx.boxes.push({
+    kind: "shape",
+    id: `box-${ctx.seq++}`,
+    nodeId: node.id,
+    x: rect.x,
+    y: rect.y,
+    w: rect.w,
+    h: rect.h,
+    z: z + 10,
+    anim,
+    geometry: node.shape,
+    fill: isLine || node.gradient ? undefined : color(ctx, node.fill, "accent"),
+    gradient: isLine ? undefined : gradient(ctx, node.gradient),
+    stroke:
+      stroke(ctx, node.border) ?? (isLine ? { color: color(ctx, node.fill, "accent"), width: 2 } : undefined),
+    shadow: node.shadow,
+  });
+  if (node.text && !isLine) {
+    const spec = specFrom(ctx, node.textStyle ?? {}, {
+      fontId: ctx.tokens.fonts.body,
+      size: ctx.tokens.fontSizes.body,
+      bold: true,
+      align: "center",
+      lineHeight: 1.2,
+    });
+    let size = spec.size;
+    let lines = wrapSpec(node.text, spec, size, rect.w * 0.85);
+    while (lines.length * size * spec.lineHeight > rect.h * 0.9 && shrink(ctx, size) !== null) {
+      size = shrink(ctx, size)!;
+      lines = wrapSpec(node.text, spec, size, rect.w * 0.85);
+    }
+    const textH = lines.length * size * spec.lineHeight;
     ctx.boxes.push({
       kind: "text",
       id: `box-${ctx.seq++}`,
       nodeId: node.id,
-      x: innerX,
-      y,
-      w: innerW,
-      h: t.fontSizes.small * 1.3,
-      z: z + 100,
-      paragraphs: [{ lines: [node.delta], bullet: false }],
-      fontId: t.fonts.body,
-      bold: false,
-      italic: false,
-      size: t.fontSizes.small,
-      lineHeight: 1.3,
-      color: t.colors["text-secondary"],
-      align: "left",
+      x: rect.x + rect.w * 0.075,
+      y: rect.y + (rect.h - textH) / 2,
+      w: rect.w * 0.85,
+      h: textH,
+      z: z + 110,
+      anim,
+      paragraphs: [{ lines, bullet: false }],
+      fontId: spec.fontId,
+      bold: spec.bold,
+      italic: spec.italic,
+      underline: spec.underline,
+      size,
+      lineHeight: spec.lineHeight,
+      letterSpacing: spec.letterSpacing,
+      color: node.textStyle?.color
+        ? color(ctx, node.textStyle.color, "background")
+        : color(ctx, "background", "background"),
+      align: spec.align,
+      valign: "middle",
       paragraphGap: 0,
     });
   }
+}
+
+function layoutTable(ctx: Ctx, node: Extract<DeckNode, { type: "table" }>, rect: Rect, z: number) {
+  const t = ctx.tokens;
+  const m = measureTable(ctx, node, rect.w);
+  const totalH = m.rowH.reduce((a, b) => a + b, 0);
+  if (totalH > rect.h + 1) {
+    ctx.warnings.push(`table "${node.id}" is ${Math.round(totalH - rect.h)}px taller than its box`);
+  }
+  const cells: TableBox["cells"] = node.rows.map((row, r) => {
+    const isHeader = node.header !== false && r === 0;
+    const zebra = !isHeader && (node.header !== false ? r % 2 === 0 : r % 2 === 1);
+    return row.map((text) => ({
+      text,
+      bold: isHeader,
+      fill: isHeader ? t.colors.accent : zebra ? t.colors.surface : undefined,
+      color: isHeader ? t.colors.background : t.colors["text-primary"],
+      align: node.style?.align ?? "left",
+    }));
+  });
+  ctx.boxes.push({
+    kind: "table",
+    id: `box-${ctx.seq++}`,
+    nodeId: node.id,
+    x: rect.x,
+    y: rect.y,
+    w: rect.w,
+    h: totalH,
+    z: z + 50,
+    anim: animOf(ctx, node),
+    colW: m.colW,
+    rowH: m.rowH,
+    cells,
+    fontId: t.fonts.body,
+    size: m.size,
+    borderColor: t.colors["surface-alt"],
+    cellPad: TABLE_CELL_PAD,
+  });
 }
 
 function layoutNode(ctx: Ctx, node: DeckNode, rect: Rect, z: number) {
@@ -446,6 +614,10 @@ function layoutNode(ctx: Ctx, node: DeckNode, rect: Rect, z: number) {
       return layoutTextLike(ctx, node, rect, z);
     case "metricCard":
       return layoutMetricCard(ctx, node, rect, z);
+    case "shape":
+      return layoutShape(ctx, node, rect, z);
+    case "table":
+      return layoutTable(ctx, node, rect, z);
     case "image":
       ctx.boxes.push({
         kind: "image",
@@ -456,8 +628,12 @@ function layoutNode(ctx: Ctx, node: DeckNode, rect: Rect, z: number) {
         w: rect.w,
         h: rect.h,
         z: z + 50,
+        anim: animOf(ctx, node),
         src: node.src,
         alt: node.alt,
+        fit: node.fit ?? "cover",
+        radius: node.radius ?? 0,
+        shadow: node.shadow,
       });
       return;
     case "spacer":
@@ -481,12 +657,26 @@ export function solveSlide(slide: Slide, tokens: ThemeTokens): ResolvedSlide {
     );
   }
   layoutNode(ctx, slide.root, rootRect, 1);
+
+  // freeform layer: absolute frames, painted above the flow layout
+  (slide.overlays ?? []).forEach((node, i) => {
+    const f = (node as { frame?: Rect }).frame;
+    if (!f) {
+      ctx.warnings.push(`overlay "${node.id}" has no frame; skipped`);
+      return;
+    }
+    layoutNode(ctx, node, f, 200 + i * 10);
+  });
+
   ctx.boxes.sort((a, b) => a.z - b.z);
   return {
     id: slide.id,
     w: CANVAS_W,
     h: CANVAS_H,
     background: color(ctx, slide.background, "background"),
+    gradient: gradient(ctx, slide.gradient),
+    transition: slide.transition,
+    notes: slide.notes,
     boxes: ctx.boxes,
     warnings: ctx.warnings,
   };

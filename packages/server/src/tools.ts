@@ -364,7 +364,12 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
     },
     async ({ elementId, updates }) => {
       try {
-        const allowed = new Set(["text", "level", "items", "label", "value", "delta", "src", "alt", "size", "background"]);
+        const allowed = new Set([
+          "text", "level", "items", "ordered", "label", "value", "delta",
+          "src", "alt", "fit", "size", "background",
+          "shape", "fill", "gradient", "border", "shadow", "textStyle",
+          "rows", "header", "columns",
+        ]);
         const result = store.mutate((draft) => {
           const visit = findNode(draft, elementId);
           if (!visit) throw new Error(`No element "${elementId}"`);
@@ -444,6 +449,128 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
           if (!visit.parent) throw new Error("Cannot delete a slide root; delete the slide instead");
           const siblings = (visit.parent as { children: DeckNode[] }).children;
           siblings.splice(siblings.findIndex((c) => c.id === elementId), 1);
+        }, "ai");
+        return summarize(result);
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_animation",
+    {
+      description:
+        "Set an entrance animation on any element: {effect: appear|fade|flyIn|zoom|wipe, direction?: left|right|top|bottom, order: 1.., byParagraph?: bool (bulletList: one bullet per click)}. Animating a container animates everything in it. null clears. Plays in the canvas Present mode AND in the exported pptx.",
+      inputSchema: {
+        elementId: z.string(),
+        animation: z.record(z.string(), z.unknown()).nullable(),
+      },
+    },
+    async ({ elementId, animation }) => {
+      try {
+        const result = store.mutate((draft) => {
+          const visit = findNode(draft, elementId);
+          if (!visit) throw new Error(`No element "${elementId}"`);
+          const node = visit.node as unknown as Record<string, unknown>;
+          if (animation === null) delete node.animation;
+          else node.animation = animation;
+        }, "ai");
+        return summarize(result);
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_transition",
+    {
+      description:
+        "Set a slide's enter transition: {type: none|fade|push|wipe, direction?: left|right|top|bottom}.",
+      inputSchema: { slideId: z.string(), transition: z.record(z.string(), z.unknown()).nullable() },
+    },
+    async ({ slideId, transition }) => {
+      try {
+        const result = store.mutate((draft) => {
+          const slide = requireSlide(draft, slideId);
+          if (transition === null) delete (slide as Record<string, unknown>).transition;
+          else (slide as Record<string, unknown>).transition = transition;
+        }, "ai");
+        return summarize(result);
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_notes",
+    {
+      description: "Set presenter notes on a slide (exported into the pptx notes pane).",
+      inputSchema: { slideId: z.string(), notes: z.string() },
+    },
+    async ({ slideId, notes }) => {
+      try {
+        const result = store.mutate((draft) => {
+          const slide = requireSlide(draft, slideId);
+          (slide as Record<string, unknown>).notes = notes;
+        }, "ai");
+        return summarize(result);
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "add_overlay",
+    {
+      description:
+        "Add a freeform element to a slide's overlay layer at an absolute frame {x,y,w,h} on the 1280×720 canvas — Google-Slides-style free placement, painted above the flow layout. Any element type works (shape, text, image, table, column...).",
+      inputSchema: {
+        slideId: z.string(),
+        element: ElementInput,
+        frame: z.object({
+          x: z.number(),
+          y: z.number(),
+          w: z.number(),
+          h: z.number(),
+        }),
+      },
+    },
+    async ({ slideId, element, frame }) => {
+      try {
+        let newId = "";
+        const result = store.mutate((draft) => {
+          const slide = requireSlide(draft, slideId) as Record<string, unknown>;
+          const withIds = assignIds(draft, { ...element, frame });
+          newId = (withIds as { id: string }).id;
+          slide.overlays = [...((slide.overlays as unknown[]) ?? []), withIds];
+        }, "ai");
+        return summarize(result, { elementId: newId });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_frame",
+    {
+      description:
+        "Move/resize a freeform overlay element: absolute {x,y,w,h} on the 1280×720 canvas (clamped to bounds).",
+      inputSchema: {
+        elementId: z.string(),
+        frame: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
+      },
+    },
+    async ({ elementId, frame }) => {
+      try {
+        const result = store.mutate((draft) => {
+          const visit = findNode(draft, elementId);
+          if (!visit) throw new Error(`No element "${elementId}"`);
+          (visit.node as unknown as Record<string, unknown>).frame = frame;
         }, "ai");
         return summarize(result);
       } catch (e) {

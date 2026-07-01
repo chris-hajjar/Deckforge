@@ -12,6 +12,8 @@
  * actually applied, never the rejected intent.
  */
 import {
+  CANVAS_H,
+  CANVAS_W,
   COLOR_ROLES,
   DeckSchema,
   type ColorRole,
@@ -136,33 +138,105 @@ export function normalizeDeck(input: unknown): NormalizeResult {
     holder[field] = snapped;
   };
 
+  const fixGradient = (holder: Record<string, unknown>, pointer: string) => {
+    const g = holder.gradient as Record<string, unknown> | undefined;
+    if (!g) return;
+    fixColor(g, "from", `${pointer}/gradient`, "surface");
+    fixColor(g, "to", `${pointer}/gradient`, "accent");
+  };
+
+  const fixBorder = (holder: Record<string, unknown>, pointer: string) => {
+    const b = holder.border as Record<string, unknown> | undefined;
+    if (!b) return;
+    fixColor(b, "color", `${pointer}/border`, "accent");
+  };
+
+  const fixTextStyle = (style: Record<string, unknown> | undefined, pointer: string) => {
+    if (!style) return;
+    fixColor(style, "color", pointer, "text-primary");
+    fixScale(style, "fontSize", pointer, tokens.fontSizeScale, "font size");
+  };
+
+  /** Overlay elements must sit inside the canvas; drift is clamped, not rejected. */
+  const clampFrame = (node: Record<string, unknown>, pointer: string, isOverlayRoot: boolean) => {
+    let frame = node.frame as Record<string, number> | undefined;
+    if (!frame && isOverlayRoot) {
+      frame = { x: CANVAS_W / 4, y: CANVAS_H / 4, w: CANVAS_W / 2, h: CANVAS_H / 4 };
+      corrections.push({
+        pointer,
+        field: "frame",
+        from: undefined,
+        to: frame,
+        reason: "overlay element was missing a frame; placed at canvas center",
+      });
+      node.frame = frame;
+    }
+    if (!frame) return;
+    const clamped = {
+      x: Math.min(Math.max(0, frame.x), CANVAS_W - 8),
+      y: Math.min(Math.max(0, frame.y), CANVAS_H - 8),
+      w: Math.max(8, Math.min(frame.w, CANVAS_W)),
+      h: Math.max(8, Math.min(frame.h, CANVAS_H)),
+    };
+    clamped.w = Math.min(clamped.w, CANVAS_W - clamped.x);
+    clamped.h = Math.min(clamped.h, CANVAS_H - clamped.y);
+    if (
+      clamped.x !== frame.x ||
+      clamped.y !== frame.y ||
+      clamped.w !== frame.w ||
+      clamped.h !== frame.h
+    ) {
+      corrections.push({
+        pointer,
+        field: "frame",
+        from: { ...frame },
+        to: clamped,
+        reason: "frame clamped to the 1280×720 canvas",
+      });
+      node.frame = clamped;
+    }
+  };
+
   // slide-level props
   const radiusScale = [tokens.radius.none, tokens.radius.sm, tokens.radius.md];
   deck.slides.forEach((slide, si) => {
     const sp = `/slides/${si}`;
     fixColor(slide as never, "background", sp, "background");
+    fixGradient(slide as never, sp);
     fixScale(slide as never, "padding", sp, tokens.spacingScale, "slide padding");
   });
 
   // element-level props
   for (const { node, pointer } of walkDeck(deck)) {
     const style = (node as { style?: Record<string, unknown> }).style;
+    clampFrame(node as never, pointer, /\/overlays\/\d+$/.test(pointer));
     switch (node.type) {
       case "heading":
       case "text":
       case "bulletList":
-        if (style) {
-          fixColor(style, "color", pointer, "text-primary");
-          fixScale(style, "fontSize", pointer, tokens.fontSizeScale, "font size");
-        }
+        fixTextStyle(style, pointer);
         break;
       case "metricCard":
         fixColor(node as never, "background", pointer, "surface");
+        break;
+      case "shape":
+        fixColor(node as never, "fill", pointer, "accent");
+        fixGradient(node as never, pointer);
+        fixBorder(node as never, pointer);
+        fixTextStyle((node as { textStyle?: Record<string, unknown> }).textStyle, pointer);
+        break;
+      case "image":
+        fixScale(node as never, "radius", pointer, radiusScale, "corner radius");
+        break;
+      case "table":
+        fixTextStyle(style, pointer);
         break;
       case "row":
       case "column":
         if (style) {
           fixColor(style, "background", pointer, "surface");
+          fixGradient(style, pointer);
+          fixBorder(style, pointer);
           fixScale(style, "padding", pointer, tokens.spacingScale, "padding");
           fixScale(style, "gap", pointer, tokens.spacingScale, "gap");
           fixScale(style, "radius", pointer, radiusScale, "corner radius");

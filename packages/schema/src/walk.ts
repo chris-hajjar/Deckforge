@@ -23,6 +23,10 @@ export function* walkSlide(slide: Slide, slideIndex: number): Generator<NodeVisi
     }
   }
   yield* rec(slide.root, `/slides/${slideIndex}/root`, null);
+  const overlays = slide.overlays ?? [];
+  for (let i = 0; i < overlays.length; i++) {
+    yield* rec(overlays[i], `/slides/${slideIndex}/overlays/${i}`, null);
+  }
 }
 
 export function* walkDeck(deck: Deck): Generator<NodeVisit> {

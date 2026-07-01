@@ -61,6 +61,9 @@ const tables = {
   // Georgia runs wider than Times; 1.07 keeps wrap estimates conservative.
   "serif-regular": build("LiberationSerif-Regular.ttf", "Georgia", 1.07),
   "serif-bold": build("LiberationSerif-Bold.ttf", "Georgia", 1.07),
+  // Liberation Mono is metric-compatible with Courier New.
+  "mono-regular": build("LiberationMono-Regular.ttf", "Courier New", 1),
+  "mono-bold": build("LiberationMono-Bold.ttf", "Courier New", 1),
 };
 
 for (const [name, table] of Object.entries(tables)) {
