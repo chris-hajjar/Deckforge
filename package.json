@@ -1,20 +1,25 @@
 {
-  "name": "deckforge-mcp",
-  "version": "0.1.0",
-  "description": "MCP server for agentic Spectacle deck authoring",
+  "name": "deckforge",
+  "version": "2.0.0",
+  "private": true,
   "type": "module",
-  "bin": { "deckforge-mcp": "dist/server.js" },
+  "description": "Deckforge v2 — Retool for presentations. MCP server + live canvas + pptx export from one validated deck state.",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "test:codegen": "node --experimental-strip-types src/test-codegen.ts"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "zod": "^3.23.8"
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:canvas": "npm run build -w @deckforge/canvas",
+    "serve": "tsx packages/server/src/main.ts",
+    "mcp": "tsx packages/server/src/main.ts --stdio",
+    "gen:metrics": "tsx scripts/gen-metrics.ts"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.10.0",
+    "opentype.js": "^2.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.1"
   }
 }

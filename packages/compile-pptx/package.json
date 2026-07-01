@@ -1,0 +1,14 @@
+{
+  "name": "@deckforge/compile-pptx",
+  "version": "2.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@deckforge/layout": "*",
+    "@deckforge/schema": "*",
+    "pptxgenjs": "^4.0.1"
+  }
+}
