@@ -9,6 +9,8 @@ import { useRef } from "react";
 import type { Operation } from "fast-json-patch";
 import {
   COLOR_ROLES,
+  FONT_IDS,
+  SHAPE_KINDS,
   findNode,
   type Deck,
   type DeckNode,
@@ -60,6 +62,10 @@ function Swatches({
   );
 }
 
+function Row({ children }: { children: React.ReactNode }) {
+  return <div className="btn-row wrap">{children}</div>;
+}
+
 export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, onDeselect }: Props) {
   const debounce = useRef<ReturnType<typeof setTimeout>>();
   const sendDebounced = (patches: Operation[]) => {
@@ -73,11 +79,21 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
   const visit = selectedId ? findNode(deck, selectedId) : undefined;
   const node = visit?.node;
   const pointer = visit?.pointer;
+  const isOverlayRoot = pointer ? /\/overlays\/\d+$/.test(pointer) : false;
 
   const setField = (field: string, value: unknown) =>
-    sendPatches([{ op: "replace", path: `${pointer}/${field}`, value } as Operation]);
+    sendPatches(
+      value === undefined
+        ? [{ op: "remove", path: `${pointer}/${field}` } as Operation]
+        : [{ op: "replace", path: `${pointer}/${field}`, value } as Operation],
+    );
 
-  const mergeObj = (field: "style" | "sizing", key: string, value: unknown, debounced = false) => {
+  const mergeObj = (
+    field: "style" | "sizing" | "textStyle" | "border" | "gradient" | "frame" | "animation",
+    key: string,
+    value: unknown,
+    debounced = false,
+  ) => {
     const current = { ...((node as never as Record<string, Record<string, unknown>>)[field] ?? {}) };
     if (value === null) delete current[key];
     else current[key] = value;
@@ -87,13 +103,166 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
 
   const slidePtr = `/slides/${slideIndex}`;
   const setSlideField = (field: string, value: unknown) =>
-    sendPatches([{ op: "replace", path: `${slidePtr}/${field}`, value } as Operation]);
+    sendPatches(
+      value === undefined
+        ? [{ op: "remove", path: `${slidePtr}/${field}` } as Operation]
+        : [{ op: "replace", path: `${slidePtr}/${field}`, value } as Operation],
+    );
 
   const addChild = (containerPtr: string, child: Record<string, unknown>) =>
     sendPatches([{ op: "add", path: `${containerPtr}/children/-`, value: child } as Operation]);
 
+  const addOverlay = (element: Record<string, unknown>, frame: Record<string, number>) =>
+    sendPatches([
+      slide.overlays
+        ? ({ op: "add", path: `${slidePtr}/overlays/-`, value: { ...element, frame } } as Operation)
+        : ({ op: "add", path: `${slidePtr}/overlays`, value: [{ ...element, frame }] } as Operation),
+    ]);
+
   const spacingMax = Math.max(...tokens.spacingScale);
   const sizes = tokens.fontSizeScale;
+
+  // ---------- shared sections ----------
+  const animSection = (n: DeckNode) => {
+    const a = n.animation;
+    return (
+      <>
+        <label>Animate in</label>
+        <Row>
+          {(["none", "appear", "fade", "flyIn", "zoom", "wipe"] as const).map((eff) => (
+            <button
+              key={eff}
+              className={(a?.effect ?? "none") === eff ? "active" : ""}
+              onClick={() =>
+                eff === "none"
+                  ? setField("animation", undefined)
+                  : setField("animation", { ...(a ?? { order: 1 }), effect: eff })
+              }
+            >
+              {eff}
+            </button>
+          ))}
+        </Row>
+        {a && (a.effect === "flyIn" || a.effect === "wipe") && (
+          <Row>
+            {(["left", "right", "top", "bottom"] as const).map((d) => (
+              <button
+                key={d}
+                className={(a.direction ?? "bottom") === d ? "active" : ""}
+                onClick={() => mergeObj("animation", "direction", d)}
+              >
+                {d}
+              </button>
+            ))}
+          </Row>
+        )}
+        {a && (
+          <>
+            <label>
+              Click order <span className="val">{a.order ?? 1}</span>
+            </label>
+            <input
+              type="range"
+              min={1}
+              max={8}
+              value={a.order ?? 1}
+              onChange={(e) => mergeObj("animation", "order", Number(e.target.value), true)}
+            />
+            {n.type === "bulletList" && (
+              <Row>
+                <button
+                  className={a.byParagraph ? "active" : ""}
+                  onClick={() => mergeObj("animation", "byParagraph", !a.byParagraph)}
+                >
+                  one bullet per click
+                </button>
+              </Row>
+            )}
+          </>
+        )}
+      </>
+    );
+  };
+
+  const frameSection = (n: DeckNode) => {
+    if (!isOverlayRoot || !n.frame) return null;
+    const f = n.frame;
+    const num = (key: "x" | "y" | "w" | "h", label: string) => (
+      <label className="frame-field">
+        {label}
+        <input
+          type="number"
+          value={Math.round(f[key])}
+          onChange={(e) => mergeObj("frame", key, Number(e.target.value), true)}
+        />
+      </label>
+    );
+    return (
+      <>
+        <label>Position &amp; size (drag on canvas, or exact)</label>
+        <div className="frame-grid">
+          {num("x", "x")}
+          {num("y", "y")}
+          {num("w", "w")}
+          {num("h", "h")}
+        </div>
+      </>
+    );
+  };
+
+  const gradientSection = (
+    holder: { gradient?: { from: string; to: string; angle?: number } },
+    field: "style" | "gradient",
+    directOnNode: boolean,
+  ) => {
+    const g = directOnNode ? (node as { gradient?: typeof holder.gradient }).gradient : holder.gradient;
+    const set = (key: string, value: unknown) =>
+      directOnNode ? mergeObj("gradient", key, value) : mergeObjStyle("gradient", { ...(g ?? {}), [key]: value });
+    const mergeObjStyle = (key: string, value: unknown) => mergeObj("style", key, value);
+    return (
+      <>
+        <label>Gradient</label>
+        {g ? (
+          <>
+            <Row>
+              <span className="mini">from</span>
+              <Swatches tokens={tokens} value={g.from} onPick={(r) => r && set("from", r)} />
+            </Row>
+            <Row>
+              <span className="mini">to</span>
+              <Swatches tokens={tokens} value={g.to} onPick={(r) => r && set("to", r)} />
+            </Row>
+            <Row>
+              {[0, 45, 90, 135].map((ang) => (
+                <button key={ang} className={(g.angle ?? 90) === ang ? "active" : ""} onClick={() => set("angle", ang)}>
+                  {ang}°
+                </button>
+              ))}
+              <button
+                onClick={() =>
+                  directOnNode ? setField("gradient", undefined) : mergeObjStyle("gradient", null)
+                }
+              >
+                clear
+              </button>
+            </Row>
+          </>
+        ) : (
+          <Row>
+            <button
+              onClick={() =>
+                directOnNode
+                  ? setField("gradient", { from: "surface", to: "accent", angle: 90 })
+                  : mergeObjStyle("gradient", { from: "surface", to: "accent", angle: 90 })
+              }
+            >
+              + add gradient
+            </button>
+          </Row>
+        )}
+      </>
+    );
+  };
 
   // ---------- element panels ----------
   const textPanel = (n: Extract<DeckNode, { type: "heading" | "text" | "bulletList" }>) => {
@@ -107,36 +276,39 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
             rows={5}
             defaultValue={n.items.join("\n")}
             onBlur={(e) =>
-              setField(
-                "items",
-                e.target.value.split("\n").filter((s) => s.trim().length > 0),
-              )
+              setField("items", e.target.value.split("\n").filter((s) => s.trim().length > 0))
             }
           />
         ) : (
-          <textarea
-            key={n.id}
-            rows={3}
-            defaultValue={n.text}
-            onBlur={(e) => setField("text", e.target.value)}
-          />
+          <textarea key={n.id} rows={3} defaultValue={n.text} onBlur={(e) => setField("text", e.target.value)} />
+        )}
+        {n.type === "bulletList" && (
+          <Row>
+            <button className={!n.ordered ? "active" : ""} onClick={() => setField("ordered", undefined)}>• bullets</button>
+            <button className={n.ordered ? "active" : ""} onClick={() => setField("ordered", true)}>1. numbered</button>
+          </Row>
         )}
         {n.type === "heading" && (
-          <>
-            <label>Level</label>
-            <div className="btn-row">
-              {[1, 2].map((lv) => (
-                <button
-                  key={lv}
-                  className={n.level === lv ? "active" : ""}
-                  onClick={() => setField("level", lv)}
-                >
-                  H{lv}
-                </button>
-              ))}
-            </div>
-          </>
+          <Row>
+            {[1, 2].map((lv) => (
+              <button key={lv} className={n.level === lv ? "active" : ""} onClick={() => setField("level", lv)}>
+                H{lv}
+              </button>
+            ))}
+          </Row>
         )}
+        <label>Font</label>
+        <Row>
+          {FONT_IDS.map((f) => (
+            <button
+              key={f}
+              className={(style.font ?? "") === f ? "active" : ""}
+              onClick={() => mergeObj("style", "font", style.font === f ? null : f)}
+            >
+              {f}
+            </button>
+          ))}
+        </Row>
         <label>
           Font size <span className="val">{(style.fontSize as number) ?? "auto"}</span>
         </label>
@@ -154,30 +326,38 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
           allowNone
           onPick={(role) => mergeObj("style", "color", role)}
         />
-        <div className="btn-row">
-          <button
-            className={style.bold ? "active" : ""}
-            onClick={() => mergeObj("style", "bold", !style.bold)}
-          >
-            B
-          </button>
-          <button
-            className={style.italic ? "active" : ""}
-            style={{ fontStyle: "italic" }}
-            onClick={() => mergeObj("style", "italic", !style.italic)}
-          >
-            I
-          </button>
+        <Row>
+          <button className={style.bold ? "active" : ""} onClick={() => mergeObj("style", "bold", !style.bold)}>B</button>
+          <button className={style.italic ? "active" : ""} style={{ fontStyle: "italic" }} onClick={() => mergeObj("style", "italic", !style.italic)}>I</button>
+          <button className={style.underline ? "active" : ""} style={{ textDecoration: "underline" }} onClick={() => mergeObj("style", "underline", !style.underline)}>U</button>
+          <button className={style.uppercase ? "active" : ""} onClick={() => mergeObj("style", "uppercase", !style.uppercase)}>AA</button>
           {(["left", "center", "right"] as const).map((a) => (
-            <button
-              key={a}
-              className={(style.align ?? "left") === a ? "active" : ""}
-              onClick={() => mergeObj("style", "align", a)}
-            >
+            <button key={a} className={(style.align ?? "left") === a ? "active" : ""} onClick={() => mergeObj("style", "align", a)}>
               {a === "left" ? "⇤" : a === "center" ? "≡" : "⇥"}
             </button>
           ))}
-        </div>
+        </Row>
+        <label>
+          Line height <span className="val">{(style.lineHeight as number) ?? "auto"}</span>
+        </label>
+        <input
+          type="range"
+          min={0.9}
+          max={2.5}
+          step={0.05}
+          value={(style.lineHeight as number) ?? 1.35}
+          onChange={(e) => mergeObj("style", "lineHeight", Number(e.target.value), true)}
+        />
+        <label>
+          Letter spacing <span className="val">{(style.letterSpacing as number) ?? 0}px</span>
+        </label>
+        <input
+          type="range"
+          min={0}
+          max={12}
+          value={(style.letterSpacing as number) ?? 0}
+          onChange={(e) => mergeObj("style", "letterSpacing", Number(e.target.value), true)}
+        />
       </>
     );
   };
@@ -189,74 +369,98 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
         <label>
           Padding <span className="val">{(style.padding as number) ?? 0}px</span>
         </label>
-        <input
-          type="range"
-          min={0}
-          max={spacingMax}
-          value={(style.padding as number) ?? 0}
-          onChange={(e) => mergeObj("style", "padding", Number(e.target.value), true)}
-        />
+        <input type="range" min={0} max={spacingMax} value={(style.padding as number) ?? 0}
+          onChange={(e) => mergeObj("style", "padding", Number(e.target.value), true)} />
         <label>
           Gap <span className="val">{(style.gap as number) ?? 16}px</span>
         </label>
-        <input
-          type="range"
-          min={0}
-          max={spacingMax}
-          value={(style.gap as number) ?? 16}
-          onChange={(e) => mergeObj("style", "gap", Number(e.target.value), true)}
-        />
+        <input type="range" min={0} max={spacingMax} value={(style.gap as number) ?? 16}
+          onChange={(e) => mergeObj("style", "gap", Number(e.target.value), true)} />
         <label>Background</label>
-        <Swatches
-          tokens={tokens}
-          value={style.background as string | undefined}
-          allowNone
-          onPick={(role) => mergeObj("style", "background", role)}
-        />
+        <Swatches tokens={tokens} value={style.background as string | undefined} allowNone
+          onPick={(role) => mergeObj("style", "background", role)} />
+        {gradientSection(style as never, "style", false)}
+        <label>Border &amp; shadow</label>
+        <Row>
+          {style.border ? (
+            <>
+              <Swatches tokens={tokens} value={(style.border as { color: string }).color}
+                onPick={(r) => r && mergeObj("style", "border", { ...(style.border as object), color: r })} />
+              <button onClick={() => mergeObj("style", "border", null)}>clear border</button>
+            </>
+          ) : (
+            <button onClick={() => mergeObj("style", "border", { color: "accent", width: 2 })}>+ border</button>
+          )}
+          <button className={style.shadow ? "active" : ""} onClick={() => mergeObj("style", "shadow", !style.shadow)}>
+            shadow
+          </button>
+        </Row>
         <label>Corner radius</label>
-        <div className="btn-row">
+        <Row>
           {Object.entries(tokens.radius).map(([name, px]) => (
-            <button
-              key={name}
-              className={(style.radius ?? 0) === px ? "active" : ""}
-              onClick={() => mergeObj("style", "radius", px)}
-            >
+            <button key={name} className={(style.radius ?? 0) === px ? "active" : ""} onClick={() => mergeObj("style", "radius", px)}>
               {name}
             </button>
           ))}
-        </div>
+        </Row>
         <label>{n.type === "column" ? "Justify (vertical)" : "Align (vertical)"}</label>
-        <div className="btn-row">
+        <Row>
           {(n.type === "column"
             ? (["start", "center", "end", "between"] as const)
             : (["stretch", "start", "center", "end"] as const)
           ).map((j) => (
-            <button
-              key={j}
-              className={
-                (style[n.type === "column" ? "justify" : "align"] ??
-                  (n.type === "column" ? "start" : "stretch")) === j
-                  ? "active"
-                  : ""
-              }
-              onClick={() => mergeObj("style", n.type === "column" ? "justify" : "align", j)}
-            >
+            <button key={j}
+              className={(style[n.type === "column" ? "justify" : "align"] ?? (n.type === "column" ? "start" : "stretch")) === j ? "active" : ""}
+              onClick={() => mergeObj("style", n.type === "column" ? "justify" : "align", j)}>
               {j}
             </button>
           ))}
-        </div>
+        </Row>
         <label>Add child</label>
-        <div className="btn-row wrap">
+        <Row>
           <button onClick={() => addChild(pointer!, { id: genId("heading"), type: "heading", text: "Heading", level: 2 })}>heading</button>
           <button onClick={() => addChild(pointer!, { id: genId("text"), type: "text", text: "Text" })}>text</button>
           <button onClick={() => addChild(pointer!, { id: genId("list"), type: "bulletList", items: ["Point"] })}>bullets</button>
           <button onClick={() => addChild(pointer!, { id: genId("metric"), type: "metricCard", label: "Metric", value: "0" })}>metric</button>
+          <button onClick={() => addChild(pointer!, { id: genId("shape"), type: "shape", shape: "roundRect", fill: "accent", text: "Label" })}>shape</button>
+          <button onClick={() => addChild(pointer!, { id: genId("table"), type: "table", rows: [["Col A", "Col B"], ["", ""]] })}>table</button>
+          <button onClick={() => addChild(pointer!, { id: genId("img"), type: "image", src: "", alt: "image" })}>image</button>
           <button onClick={() => addChild(pointer!, { id: genId("row"), type: "row", style: { gap: 16 }, children: [] })}>row</button>
           <button onClick={() => addChild(pointer!, { id: genId("col"), type: "column", style: { gap: 16 }, children: [] })}>column</button>
-        </div>
+        </Row>
       </>
     );
   };
+
+  const shapePanel = (n: Extract<DeckNode, { type: "shape" }>) => (
+    <>
+      <label>Geometry</label>
+      <Row>
+        {SHAPE_KINDS.map((k) => (
+          <button key={k} className={n.shape === k ? "active" : ""} onClick={() => setField("shape", k)}>
+            {k}
+          </button>
+        ))}
+      </Row>
+      <label>Label</label>
+      <input key={n.id} defaultValue={n.text ?? ""} onBlur={(e) => setField("text", e.target.value || undefined)} />
+      <label>Fill</label>
+      <Swatches tokens={tokens} value={n.fill} onPick={(r) => r && setField("fill", r)} />
+      {gradientSection(n as never, "gradient", true)}
+      <label>Border &amp; shadow</label>
+      <Row>
+        {n.border ? (
+          <>
+            <Swatches tokens={tokens} value={n.border.color} onPick={(r) => r && mergeObj("border", "color", r)} />
+            <button onClick={() => setField("border", undefined)}>clear border</button>
+          </>
+        ) : (
+          <button onClick={() => setField("border", { color: "text-primary", width: 2 })}>+ border</button>
+        )}
+        <button className={n.shadow ? "active" : ""} onClick={() => setField("shadow", !n.shadow)}>shadow</button>
+      </Row>
+    </>
+  );
 
   const metricPanel = (n: Extract<DeckNode, { type: "metricCard" }>) => (
     <>
@@ -265,19 +469,56 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
       <label>Value</label>
       <input key={`${n.id}-v`} defaultValue={n.value} onBlur={(e) => setField("value", e.target.value)} />
       <label>Delta (optional)</label>
-      <input
-        key={`${n.id}-d`}
-        defaultValue={n.delta ?? ""}
-        placeholder="+12% QoQ"
-        onBlur={(e) => setField("delta", e.target.value || undefined)}
-      />
+      <input key={`${n.id}-d`} defaultValue={n.delta ?? ""} placeholder="+12% QoQ"
+        onBlur={(e) => setField("delta", e.target.value || undefined)} />
       <label>Card background</label>
-      <Swatches
-        tokens={tokens}
-        value={n.background}
-        onPick={(role) => role && setField("background", role)}
-      />
+      <Swatches tokens={tokens} value={n.background} onPick={(role) => role && setField("background", role)} />
       <p className="hint">Value color/weight is brand-locked (accent, bold).</p>
+    </>
+  );
+
+  const imagePanel = (n: Extract<DeckNode, { type: "image" }>) => (
+    <>
+      <label>Image URL</label>
+      <input key={n.id} defaultValue={n.src} placeholder="https://…"
+        onBlur={(e) => setField("src", e.target.value)} />
+      <label>Alt text</label>
+      <input key={`${n.id}-alt`} defaultValue={n.alt ?? ""} onBlur={(e) => setField("alt", e.target.value || undefined)} />
+      <Row>
+        {(["cover", "contain"] as const).map((f) => (
+          <button key={f} className={(n.fit ?? "cover") === f ? "active" : ""} onClick={() => setField("fit", f)}>
+            {f}
+          </button>
+        ))}
+        <button className={n.shadow ? "active" : ""} onClick={() => setField("shadow", !n.shadow)}>shadow</button>
+      </Row>
+    </>
+  );
+
+  const tablePanel = (n: Extract<DeckNode, { type: "table" }>) => (
+    <>
+      <label>Cells (one row per line, columns split by |)</label>
+      <textarea
+        key={n.id}
+        rows={6}
+        defaultValue={n.rows.map((r) => r.join(" | ")).join("\n")}
+        onBlur={(e) => {
+          const rows = e.target.value
+            .split("\n")
+            .map((line) => line.split("|").map((c) => c.trim()))
+            .filter((r) => r.length > 0 && r.some((c) => c.length > 0));
+          if (rows.length > 0) {
+            const cols = Math.max(...rows.map((r) => r.length));
+            setField("rows", rows.map((r) => [...r, ...Array(cols - r.length).fill("")]));
+          }
+        }}
+      />
+      <Row>
+        <button className={n.header !== false ? "active" : ""} onClick={() => setField("header", n.header === false ? true : false)}>
+          header row
+        </button>
+      </Row>
+      <p className="hint">Header/zebra colors are brand-locked to the theme.</p>
     </>
   );
 
@@ -300,24 +541,22 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
               ✕
             </button>
           </div>
-          {(node.type === "heading" || node.type === "text" || node.type === "bulletList") &&
-            textPanel(node)}
+          {frameSection(node)}
+          {(node.type === "heading" || node.type === "text" || node.type === "bulletList") && textPanel(node)}
           {(node.type === "row" || node.type === "column") && containerPanel(node)}
           {node.type === "metricCard" && metricPanel(node)}
+          {node.type === "shape" && shapePanel(node)}
+          {node.type === "image" && imagePanel(node)}
+          {node.type === "table" && tablePanel(node)}
           {node.type === "spacer" && (
             <>
-              <label>
-                Size <span className="val">{node.size}px</span>
-              </label>
-              <input
-                type="range"
-                min={0}
-                max={spacingMax}
-                value={node.size}
-                onChange={(e) => sendDebounced([{ op: "replace", path: `${pointer}/size`, value: Number(e.target.value) } as Operation])}
-              />
+              <label>Size <span className="val">{node.size}px</span></label>
+              <input type="range" min={0} max={spacingMax} value={node.size}
+                onChange={(e) => sendDebounced([{ op: "replace", path: `${pointer}/size`, value: Number(e.target.value) } as Operation])} />
             </>
           )}
+          <hr />
+          {animSection(node)}
         </>
       ) : (
         <>
@@ -326,33 +565,67 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
             <code>{slide.id}</code>
           </div>
           <label>Name</label>
-          <input
-            key={slide.id}
-            defaultValue={slide.name ?? ""}
-            onBlur={(e) => setSlideField("name", e.target.value)}
-          />
-          <label>
-            Padding <span className="val">{slide.padding ?? 64}px</span>
-          </label>
-          <input
-            type="range"
-            min={0}
-            max={128}
-            value={slide.padding ?? 64}
-            onChange={(e) => sendDebounced([{ op: "replace", path: `${slidePtr}/padding`, value: Number(e.target.value) } as Operation])}
-          />
+          <input key={slide.id} defaultValue={slide.name ?? ""} onBlur={(e) => setSlideField("name", e.target.value)} />
+          <label>Padding <span className="val">{slide.padding ?? 64}px</span></label>
+          <input type="range" min={0} max={128} value={slide.padding ?? 64}
+            onChange={(e) => sendDebounced([{ op: "replace", path: `${slidePtr}/padding`, value: Number(e.target.value) } as Operation])} />
           <label>Background</label>
-          <Swatches
-            tokens={tokens}
-            value={slide.background}
-            allowNone
-            onPick={(role) =>
-              role
-                ? setSlideField("background", role)
-                : sendPatches([{ op: "remove", path: `${slidePtr}/background` } as Operation])
-            }
-          />
-          <p className="hint">Click any element on the canvas to inspect it. Double-click text to edit inline.</p>
+          <Swatches tokens={tokens} value={slide.background} allowNone
+            onPick={(role) => (role ? setSlideField("background", role) : setSlideField("background", undefined))} />
+          <label>Background gradient</label>
+          {slide.gradient ? (
+            <>
+              <Row>
+                <span className="mini">from</span>
+                <Swatches tokens={tokens} value={slide.gradient.from}
+                  onPick={(r) => r && setSlideField("gradient", { ...slide.gradient, from: r })} />
+              </Row>
+              <Row>
+                <span className="mini">to</span>
+                <Swatches tokens={tokens} value={slide.gradient.to}
+                  onPick={(r) => r && setSlideField("gradient", { ...slide.gradient, to: r })} />
+              </Row>
+              <Row>
+                <button onClick={() => setSlideField("gradient", undefined)}>clear gradient</button>
+              </Row>
+            </>
+          ) : (
+            <Row>
+              <button onClick={() => setSlideField("gradient", { from: "background", to: "surface-alt", angle: 90 })}>
+                + add gradient
+              </button>
+            </Row>
+          )}
+          <label>Transition</label>
+          <Row>
+            {(["none", "fade", "push", "wipe"] as const).map((t) => (
+              <button key={t} className={(slide.transition?.type ?? "none") === t ? "active" : ""}
+                onClick={() => (t === "none" ? setSlideField("transition", undefined) : setSlideField("transition", { type: t, direction: slide.transition?.direction ?? "left" }))}>
+                {t}
+              </button>
+            ))}
+          </Row>
+          {slide.transition && slide.transition.type !== "fade" && (
+            <Row>
+              {(["left", "right", "top", "bottom"] as const).map((d) => (
+                <button key={d} className={(slide.transition?.direction ?? "left") === d ? "active" : ""}
+                  onClick={() => setSlideField("transition", { ...slide.transition, direction: d })}>
+                  {d}
+                </button>
+              ))}
+            </Row>
+          )}
+          <label>Add floating element (drag to place)</label>
+          <Row>
+            <button onClick={() => addOverlay({ id: genId("shape"), type: "shape", shape: "roundRect", fill: "accent", text: "Shape" }, { x: 480, y: 280, w: 320, h: 160 })}>shape</button>
+            <button onClick={() => addOverlay({ id: genId("text"), type: "text", text: "Floating text" }, { x: 480, y: 320, w: 320, h: 80 })}>text</button>
+            <button onClick={() => addOverlay({ id: genId("img"), type: "image", src: "", alt: "image" }, { x: 480, y: 240, w: 320, h: 240 })}>image</button>
+            <button onClick={() => addOverlay({ id: genId("line"), type: "shape", shape: "line", fill: "accent" }, { x: 320, y: 360, w: 640, h: 8 })}>line</button>
+          </Row>
+          <label>Presenter notes</label>
+          <textarea key={`${slide.id}-notes`} rows={4} defaultValue={slide.notes ?? ""}
+            onBlur={(e) => setSlideField("notes", e.target.value || undefined)} />
+          <p className="hint">Click any element on the canvas to inspect it. Double-click text to edit inline. Drag floating elements to move them.</p>
         </>
       )}
     </aside>

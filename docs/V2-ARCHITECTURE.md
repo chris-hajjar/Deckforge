@@ -208,15 +208,38 @@ packages/
 `schema`, `validate`, `layout`, `compile-pptx` are pure libraries with no I/O
 — unit-testable without a server or browser.
 
-### Deliberately out of scope for v2.0
+### v2.1 — deep customization (shipped)
 
-- **Animations/transitions.** v1 had Reveal.js fragments; PPTX animation
-  mapping is a tar pit and irrelevant to the core loop. The schema keeps an
-  optional slot; nothing consumes it yet.
+The Google-Slides-parity round, built on the same three pillars:
+
+- **Shapes:** 9 native autoshape geometries (rect/roundRect/ellipse/triangle/
+  diamond/chevron/rightArrow/pill/line) with token fills, gradients, borders,
+  shadows and centered labels — SVG on canvas, `prstGeom` in pptx.
+- **Freeform layer:** every slide has `overlays` — elements with absolute
+  `frame`s, draggable/resizable on canvas, clamped by validate.
+- **Animations:** entrance effects (appear/fade/flyIn/zoom/wipe) with click
+  `order` and per-bullet builds, plus slide transitions (fade/push/wipe).
+  pptxgenjs can't express these, so the compiler post-processes the OpenXML
+  zip and injects `<p:transition>` and `<p:timing>` trees directly (see
+  `compile-pptx/src/animate.ts`); the canvas Present mode plays the same
+  reveal plan (`layout/src/steps.ts` is shared so canvas and PowerPoint click
+  through identically).
+- **Tables:** brand-styled (accent header, zebra rows — token-locked), solver
+  measures cells, pptx emits a native editable `<a:tbl>`.
+- **Images:** real embedding (server fetches URLs → base64), cover/contain.
+- **Rich text:** per-element font (sans/serif/mono → Arial/Georgia/Courier
+  New), lineHeight, letterSpacing, uppercase, underline, ordered lists.
+- **Gradients** (slide backgrounds, containers, shapes) via the same XML
+  injector; **speaker notes** exported to the pptx notes pane.
+
+### Deliberately out of scope (still)
+
+- **Charts.** Next natural milestone (pptxgenjs has native chart support).
 - **Cloud/multi-user.** Local single process. But because sync is
   patches-over-WebSocket, swapping the transport/store later doesn't change
   the interfaces.
 - **Arbitrary fonts.** Metrics-known brand stacks only (see Pillar A).
+- **Motion-path/emphasis/exit animations.** Entrance effects only.
 
 ---
 

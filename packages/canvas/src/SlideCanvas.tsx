@@ -1,19 +1,23 @@
 /**
- * SlideCanvas — renders a ResolvedSlide as absolutely-positioned divs.
- * It draws ONLY what the layout solver produced (the same boxes the pptx
- * compiler consumes), scaled to fit; there is no CSS layout happening here.
- * Double-click a text box to edit inline; edits emit JSON patches upstream.
+ * SlideCanvas — the editing surface. Paints the layout solver's resolved
+ * boxes via BoxView, and layers editor interactivity on top: click-to-select,
+ * double-click inline text editing, and drag/resize for freeform overlay
+ * elements (Google-Slides style). All edits leave as JSON patches upstream.
  */
-import { useMemo, useState } from "react";
-import type { Slide, ThemeTokens } from "@deckforge/schema";
+import { useMemo, useRef, useState } from "react";
+import type { Deck, Frame, Slide, ThemeTokens } from "@deckforge/schema";
 import { findNode } from "@deckforge/schema";
 import { solveSlide, CANVAS_W, CANVAS_H, type TextBox } from "@deckforge/layout";
-import type { Deck } from "@deckforge/schema";
+import { BoxView, FONT_STACKS, cssGradient } from "./BoxView.js";
 
-const FONT_STACKS: Record<string, string> = {
-  sans: 'Arial, "Liberation Sans", Helvetica, sans-serif',
-  serif: 'Georgia, "Liberation Serif", serif',
-};
+interface DragState {
+  nodeId: string;
+  mode: "move" | "resize";
+  startX: number;
+  startY: number;
+  dx: number;
+  dy: number;
+}
 
 interface Props {
   deck: Deck;
@@ -23,6 +27,7 @@ interface Props {
   selectedId?: string | null;
   onSelect?: (nodeId: string | null) => void;
   onEditText?: (nodeId: string, text: string) => void;
+  onFrameChange?: (nodeId: string, frame: Frame) => void;
   interactive?: boolean;
 }
 
@@ -34,10 +39,79 @@ export function SlideCanvas({
   selectedId,
   onSelect,
   onEditText,
+  onFrameChange,
   interactive = true,
 }: Props) {
   const resolved = useMemo(() => solveSlide(slide, tokens), [slide, tokens]);
   const [editing, setEditing] = useState<string | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+
+  const overlayFrames = useMemo(() => {
+    const map = new Map<string, Frame>();
+    for (const node of slide.overlays ?? []) {
+      if (node.frame) map.set(node.id, node.frame);
+    }
+    return map;
+  }, [slide]);
+
+  const beginDrag = (nodeId: string, mode: DragState["mode"], e: React.PointerEvent) => {
+    if (!interactive || !onFrameChange) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const state: DragState = { nodeId, mode, startX: e.clientX, startY: e.clientY, dx: 0, dy: 0 };
+    dragRef.current = state;
+    setDrag(state);
+    const move = (ev: PointerEvent) => {
+      const s = dragRef.current;
+      if (!s) return;
+      const next = { ...s, dx: ev.clientX - s.startX, dy: ev.clientY - s.startY };
+      dragRef.current = next;
+      setDrag(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const s = dragRef.current;
+      dragRef.current = null;
+      setDrag(null);
+      if (!s || (Math.abs(s.dx) < 3 && Math.abs(s.dy) < 3)) return;
+      const f = overlayFrames.get(s.nodeId);
+      if (!f) return;
+      const d = { x: s.dx / scale, y: s.dy / scale };
+      const frame: Frame =
+        s.mode === "move"
+          ? { ...f, x: Math.round(f.x + d.x), y: Math.round(f.y + d.y) }
+          : { ...f, w: Math.max(16, Math.round(f.w + d.x)), h: Math.max(16, Math.round(f.h + d.y)) };
+      onFrameChange(s.nodeId, frame);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /** Live drag offset for boxes belonging to the dragged overlay subtree. */
+  const dragStyle = (nodeId: string): React.CSSProperties | undefined => {
+    if (!drag) return undefined;
+    const rootId = overlaySubtreeRoot(nodeId);
+    if (rootId !== drag.nodeId) return undefined;
+    return drag.mode === "move"
+      ? { transform: `translate(${drag.dx}px, ${drag.dy}px)` }
+      : undefined;
+  };
+
+  /** Map any nodeId to its overlay root id (or null if it's flow content). */
+  const overlayRootOf = useMemo(() => {
+    const map = new Map<string, string>();
+    const walk = (node: { id: string; children?: unknown[] }, root: string) => {
+      map.set(node.id, root);
+      for (const c of (node.children as Array<{ id: string; children?: unknown[] }>) ?? []) {
+        walk(c, root);
+      }
+    };
+    for (const node of slide.overlays ?? []) walk(node as never, node.id);
+    return map;
+  }, [slide]);
+  const overlaySubtreeRoot = (nodeId: string) => overlayRootOf.get(nodeId) ?? null;
 
   return (
     <div
@@ -45,7 +119,7 @@ export function SlideCanvas({
       style={{
         width: CANVAS_W * scale,
         height: CANVAS_H * scale,
-        background: resolved.background,
+        background: resolved.gradient ? cssGradient(resolved.gradient) : resolved.background,
         position: "relative",
         overflow: "hidden",
         cursor: interactive ? "default" : "pointer",
@@ -56,63 +130,12 @@ export function SlideCanvas({
     >
       {resolved.boxes.map((box) => {
         const isSelected = interactive && selectedId != null && box.nodeId === selectedId;
-        const common: React.CSSProperties = {
-          position: "absolute",
-          left: box.x * scale,
-          top: box.y * scale,
-          width: box.w * scale,
-          height: box.h * scale,
-          boxSizing: "border-box",
-          outline: isSelected ? "2px solid #7c6cff" : undefined,
-          outlineOffset: 1,
-        };
-        const select = (e: React.MouseEvent) => {
-          if (!interactive) return;
-          e.stopPropagation();
-          onSelect?.(box.nodeId);
-        };
-
-        if (box.kind === "rect") {
-          return (
-            <div
-              key={box.id}
-              style={{
-                ...common,
-                background: box.fill,
-                borderRadius: box.radius * scale,
-              }}
-              onClick={select}
-            />
-          );
-        }
-
-        if (box.kind === "image") {
-          return (
-            <div
-              key={box.id}
-              style={{
-                ...common,
-                background: "#dddddd",
-                border: "1px dashed #999999",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#666666",
-                fontSize: 12 * scale,
-                fontFamily: FONT_STACKS.sans,
-              }}
-              onClick={select}
-            >
-              {box.alt ?? "image"}
-            </div>
-          );
-        }
-
-        const t = box as TextBox;
-        const node = findNode(deck, t.nodeId)?.node;
+        const overlayRoot = overlaySubtreeRoot(box.nodeId);
+        const node = findNode(deck, box.nodeId)?.node;
         const editableText = node && (node.type === "heading" || node.type === "text");
 
-        if (editing === t.id && editableText) {
+        if (editing === box.id && box.kind === "text" && editableText) {
+          const t = box as TextBox;
           return (
             <textarea
               key={t.id}
@@ -120,7 +143,11 @@ export function SlideCanvas({
               defaultValue={(node as { text: string }).text}
               className="inline-editor"
               style={{
-                ...common,
+                position: "absolute",
+                left: t.x * scale,
+                top: t.y * scale,
+                width: t.w * scale,
+                height: t.h * scale,
                 fontFamily: FONT_STACKS[t.fontId],
                 fontSize: t.size * scale,
                 fontWeight: t.bold ? 700 : 400,
@@ -134,6 +161,7 @@ export function SlideCanvas({
                 resize: "none",
                 padding: 0,
                 margin: 0,
+                boxSizing: "border-box",
               }}
               onBlur={(e) => {
                 setEditing(null);
@@ -150,47 +178,52 @@ export function SlideCanvas({
         }
 
         return (
-          <div
-            key={t.id}
-            style={{
-              ...common,
-              fontFamily: FONT_STACKS[t.fontId],
-              fontSize: t.size * scale,
-              fontWeight: t.bold ? 700 : 400,
-              fontStyle: t.italic ? "italic" : "normal",
-              lineHeight: t.lineHeight,
-              color: t.color,
-              textAlign: t.align,
-              userSelect: "none",
-              overflow: "hidden",
-            }}
-            onClick={select}
-            onDoubleClick={(e) => {
-              if (interactive && editableText) {
-                e.stopPropagation();
-                setEditing(t.id);
-              }
-            }}
-          >
-            {t.paragraphs.map((p, pi) => (
+          <div key={box.id} style={dragStyle(box.nodeId)}>
+            <BoxView box={box} scale={scale} />
+            {interactive && (
               <div
-                key={pi}
                 style={{
-                  marginBottom: pi < t.paragraphs.length - 1 ? t.paragraphGap * scale : 0,
-                  paddingLeft: p.bullet ? t.size * 1.4 * scale : 0,
-                  position: "relative",
+                  position: "absolute",
+                  left: box.x * scale,
+                  top: box.y * scale,
+                  width: box.w * scale,
+                  height: box.h * scale,
+                  outline: isSelected ? "2px solid #7c6cff" : undefined,
+                  outlineOffset: 1,
+                  cursor: overlayRoot ? "move" : "default",
                 }}
-              >
-                {p.bullet && (
-                  <span style={{ position: "absolute", left: t.size * 0.3 * scale }}>•</span>
-                )}
-                {p.lines.map((line, li) => (
-                  <div key={li} style={{ whiteSpace: "pre" }}>
-                    {line || " "}
-                  </div>
-                ))}
-              </div>
-            ))}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect?.(box.nodeId);
+                }}
+                onDoubleClick={(e) => {
+                  if (editableText && box.kind === "text") {
+                    e.stopPropagation();
+                    setEditing(box.id);
+                  }
+                }}
+                onPointerDown={(e) => {
+                  if (overlayRoot && e.button === 0) beginDrag(overlayRoot, "move", e);
+                }}
+              />
+            )}
+            {isSelected && overlayRoot === box.nodeId && overlayFrames.has(box.nodeId) && (
+              <div
+                className="resize-handle"
+                style={{
+                  position: "absolute",
+                  left: (box.x + box.w) * scale - 6,
+                  top: (box.y + box.h) * scale - 6,
+                  width: 12,
+                  height: 12,
+                  background: "#7c6cff",
+                  borderRadius: 3,
+                  cursor: "nwse-resize",
+                  zIndex: 10,
+                }}
+                onPointerDown={(e) => beginDrag(box.nodeId, "resize", e)}
+              />
+            )}
           </div>
         );
       })}

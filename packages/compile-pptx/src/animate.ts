@@ -177,16 +177,18 @@ function timingXml(targets: Target[]): string {
   for (const order of orders) {
     const group = targets.filter((t) => t.anim.order === order);
     const together: Array<{ t: Target; para?: number }> = [];
+    const followUps: string[] = [];
     for (const t of group) {
       if (t.anim.byParagraph && t.paraCount && t.paraCount > 1) {
-        // first paragraph joins this click; the rest get their own clicks
+        // first paragraph joins this click; the rest follow one click each
         together.push({ t, para: 0 });
-        for (let p = 1; p < t.paraCount; p++) clicks.push(clickPar([{ t, para: p }]));
+        for (let p = 1; p < t.paraCount; p++) followUps.push(clickPar([{ t, para: p }]));
       } else {
         together.push({ t });
       }
     }
-    if (together.length) clicks.splice(clicks.length, 0, clickPar(together));
+    if (together.length) clicks.push(clickPar(together));
+    clicks.push(...followUps);
   }
   const builds = targets
     .filter((t) => t.anim.byParagraph && t.paraCount && t.paraCount > 1)

@@ -105,3 +105,63 @@ button:disabled { opacity: 0.4; cursor: default; }
 .swatch.none { background: repeating-linear-gradient(45deg, #444 0 4px, #222 4px 8px); }
 .hint { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 .inline-editor { font-family: inherit; }
+
+/* ---------- present mode ---------- */
+.present {
+  position: fixed; inset: 0; background: #000; z-index: 100;
+  display: grid; place-items: center; cursor: pointer;
+}
+.present-hud {
+  position: fixed; right: 16px; bottom: 12px; color: #888;
+  font-size: 12px; user-select: none;
+}
+.present-btn {
+  background: none; border: 1px solid var(--line); color: var(--text);
+  border-radius: 6px; padding: 5px 12px; font-weight: 600;
+}
+.present-btn:hover { border-color: var(--brand); color: var(--brand); }
+.frame-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.frame-field { display: flex !important; align-items: center; gap: 6px; }
+.frame-field input { width: 100%; }
+.mini { font-size: 10px; color: var(--muted); align-self: center; }
+hr { border: none; border-top: 1px solid var(--line); margin: 12px 0 4px; width: 100%; }
+
+/* slide transitions (enter) */
+.df-trans-fade-left, .df-trans-fade-right, .df-trans-fade-top, .df-trans-fade-bottom
+  { animation: dfFade 0.45s ease both; }
+.df-trans-push-left   { animation: dfPushL 0.45s ease both; }
+.df-trans-push-right  { animation: dfPushR 0.45s ease both; }
+.df-trans-push-top    { animation: dfPushT 0.45s ease both; }
+.df-trans-push-bottom { animation: dfPushB 0.45s ease both; }
+.df-trans-wipe-left   { animation: dfWipeL 0.45s ease both; }
+.df-trans-wipe-right  { animation: dfWipeR 0.45s ease both; }
+.df-trans-wipe-top    { animation: dfWipeT 0.45s ease both; }
+.df-trans-wipe-bottom { animation: dfWipeB 0.45s ease both; }
+
+/* element entrances */
+.df-anim-appear { animation: none; }
+.df-anim-fade { animation: dfFade 0.5s ease both; }
+.df-anim-zoom { animation: dfZoom 0.5s ease both; }
+.df-anim-flyIn-bottom { animation: dfFlyB 0.5s cubic-bezier(.2,.8,.3,1) both; }
+.df-anim-flyIn-top    { animation: dfFlyT 0.5s cubic-bezier(.2,.8,.3,1) both; }
+.df-anim-flyIn-left   { animation: dfFlyL 0.5s cubic-bezier(.2,.8,.3,1) both; }
+.df-anim-flyIn-right  { animation: dfFlyR 0.5s cubic-bezier(.2,.8,.3,1) both; }
+.df-anim-wipe-bottom { animation: dfWipeT 0.5s ease both; }
+.df-anim-wipe-top    { animation: dfWipeB 0.5s ease both; }
+.df-anim-wipe-left   { animation: dfWipeR 0.5s ease both; }
+.df-anim-wipe-right  { animation: dfWipeL 0.5s ease both; }
+
+@keyframes dfFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dfZoom { from { opacity: 0; transform: scale(0.1); } to { opacity: 1; transform: scale(1); } }
+@keyframes dfFlyB { from { opacity: 0; transform: translateY(60vh); } to { opacity: 1; transform: none; } }
+@keyframes dfFlyT { from { opacity: 0; transform: translateY(-60vh); } to { opacity: 1; transform: none; } }
+@keyframes dfFlyL { from { opacity: 0; transform: translateX(-60vw); } to { opacity: 1; transform: none; } }
+@keyframes dfFlyR { from { opacity: 0; transform: translateX(60vw); } to { opacity: 1; transform: none; } }
+@keyframes dfPushL { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes dfPushR { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes dfPushT { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes dfPushB { from { transform: translateY(-100%); } to { transform: none; } }
+@keyframes dfWipeL { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+@keyframes dfWipeR { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+@keyframes dfWipeT { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+@keyframes dfWipeB { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }

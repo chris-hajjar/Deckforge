@@ -72,10 +72,33 @@ dir.
 ## MCP tools
 
 **Read:** `get_design_system`, `get_deck`, `get_slide`, `get_changes_since`
-**Slides:** `create_slide` (templates: title/bullets/metrics/split/blank), `delete_slide`, `move_slide`, `set_slide_props`
+**Slides:** `create_slide` (templates: title/bullets/metrics/split/blank), `delete_slide`, `move_slide`, `set_slide_props`, `set_transition`, `set_notes`
 **Elements:** `add_element`, `edit_element`, `set_style`, `set_sizing`, `delete_element`
+**Freeform:** `add_overlay` (absolute placement), `set_frame` (move/resize)
+**Motion:** `set_animation` (appear/fade/flyIn/zoom/wipe, click order, per-bullet)
 **Brand:** `set_theme` (base + hex overrides = brand registration), `set_deck_title`
 **Export:** `export_pptx`
+
+## Slide customization
+
+Element types: `heading`, `text`, `bulletList` (bullets or numbered), `metricCard`,
+`image` (embedded, cover/contain), `shape` (rect, roundRect, ellipse, triangle,
+diamond, chevron, rightArrow, pill, line — with labels, gradients, borders,
+shadows), `table` (native, brand-styled header + zebra), `row`/`column`, `spacer`.
+
+Styling: token colors, two-stop gradients, borders, shadows, corner radius,
+per-element font (sans/serif/mono), lineHeight, letterSpacing, uppercase,
+underline, bold/italic, alignment — all snapped to brand scales by the
+auto-correction engine.
+
+Freeform: every slide has an overlay layer where elements carry an absolute
+frame; drag to move, corner-handle to resize on the canvas.
+
+Animations: entrance effects with click ordering (`flyIn` a whole row of cards,
+reveal a list one bullet per click) and slide transitions (fade/push/wipe).
+These play in the canvas **Present mode** (▶) and are written into the .pptx
+as real PowerPoint animation timing trees — the same clicks work in a
+PowerPoint slideshow. Speaker notes export to the notes pane.
 
 **Resources:** `design-system://tokens`, `deck://current`
 

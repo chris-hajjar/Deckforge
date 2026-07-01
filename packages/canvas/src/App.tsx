@@ -4,16 +4,18 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Operation } from "fast-json-patch";
-import { findNode } from "@deckforge/schema";
+import { findNode, type Frame } from "@deckforge/schema";
 import { solveSlide } from "@deckforge/layout";
 import { SlideCanvas } from "./SlideCanvas.js";
 import { Inspector } from "./Inspector.js";
+import { Present } from "./Present.js";
 import { useDeck } from "./useDeck.js";
 
 export function App() {
   const { state, sendPatches } = useDeck();
   const [slideIndex, setSlideIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState(false);
   const mainRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.6);
 
@@ -43,6 +45,17 @@ export function App() {
     const visit = findNode(deck, nodeId);
     if (visit) sendPatches([{ op: "replace", path: `${visit.pointer}/text`, value: text }]);
   };
+
+  const changeFrame = (nodeId: string, frame: Frame) => {
+    const visit = findNode(deck, nodeId);
+    if (visit) sendPatches([{ op: "replace", path: `${visit.pointer}/frame`, value: frame }]);
+  };
+
+  if (presenting) {
+    return (
+      <Present deck={deck} tokens={tokens} startIndex={safeIndex} onExit={() => setPresenting(false)} />
+    );
+  }
 
   const addSlide = () => {
     const id = `slide-${Math.random().toString(36).slice(2, 8)}`;
@@ -111,6 +124,9 @@ export function App() {
         <span className={`conn ${connected ? "on" : "off"}`}>
           {connected ? `live · rev ${rev}` : "reconnecting…"}
         </span>
+        <button className="present-btn" onClick={() => setPresenting(true)}>
+          ▶ Present
+        </button>
         <a className="export" href="/api/export.pptx">
           Export .pptx
         </a>
@@ -154,6 +170,7 @@ export function App() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             onEditText={editText}
+            onFrameChange={changeFrame}
           />
           <div className="statusbar">
             {warnings.map((w, i) => (

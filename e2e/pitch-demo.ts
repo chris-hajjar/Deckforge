@@ -179,7 +179,7 @@ await page.screenshot({ path: join(outDir, "1-canvas-cover.png") });
 // go to Traction, click a metric card → inspector opens with knobs
 await page.locator(".thumb").nth(2).click();
 await page.waitForTimeout(200);
-await page.locator("main .slide-frame div", { hasText: "$4.2M" }).last().click();
+await page.locator("main .slide-frame div", { hasText: "$4.2M" }).last().click({ force: true });
 await page.waitForTimeout(200);
 const chip = await page.locator(".inspector .chip").textContent();
 check("clicking a metric card opens its inspector", chip === "metricCard", `chip=${chip}`);
@@ -238,6 +238,120 @@ for (const [i, name] of [[0, "cover"], [1, "problem"], [3, "product"], [4, "ask"
 await page.locator(".thumb").nth(2).click();
 await page.waitForTimeout(250);
 await page.locator("main .slide-frame").screenshot({ path: join(outDir, "slide-3-traction.png") });
+
+// ---------- 6. deep customization: shapes, animations, table, overlay ----------
+console.log("[6] building an animated roadmap slide (shapes/table/overlay/transition)");
+const s6 = await tool("create_slide", { template: "blank", name: "Roadmap" });
+await tool("add_element", {
+  slideId: s6.slideId,
+  element: { type: "heading", text: "Roadmap to Series C", level: 2 },
+});
+await tool("add_element", {
+  slideId: s6.slideId,
+  element: {
+    type: "row",
+    style: { gap: 16 },
+    animation: { effect: "flyIn", direction: "bottom", order: 1 },
+    children: [
+      { type: "shape", shape: "chevron", fill: "accent", text: "Build", sizing: { height: 110 } },
+      { type: "shape", shape: "chevron", fill: "accent", text: "Launch", sizing: { height: 110 } },
+      {
+        type: "shape",
+        shape: "chevron",
+        gradient: { from: "accent", to: "accent-alt", angle: 0 },
+        text: "Scale",
+        sizing: { height: 110 },
+      },
+    ],
+  },
+});
+await tool("add_element", {
+  slideId: s6.slideId,
+  element: {
+    type: "bulletList",
+    items: ["Q1 — AtlasPick GA", "Q2 — EU grocery pilots", "Q3 — 200 units/quarter"],
+    animation: { effect: "fade", order: 2, byParagraph: true },
+  },
+});
+await tool("add_element", {
+  slideId: s6.slideId,
+  element: {
+    type: "table",
+    header: true,
+    columns: [2, 1, 1],
+    rows: [
+      ["Milestone", "Quarter", "Owner"],
+      ["AtlasPick GA", "Q1", "Product"],
+      ["EU grocery pilots", "Q2", "GTM"],
+    ],
+    animation: { effect: "wipe", direction: "left", order: 3 },
+  },
+});
+await tool("add_overlay", {
+  slideId: s6.slideId,
+  element: { type: "shape", shape: "ellipse", fill: "accent-alt", text: "NEW" },
+  frame: { x: 1080, y: 48, w: 130, h: 130 },
+});
+const badgeSlide = await tool("get_slide", { slideId: s6.slideId });
+const badgeId = badgeSlide.slide.overlays[0].id;
+await tool("set_animation", { elementId: badgeId, animation: { effect: "zoom", order: 4 } });
+await tool("set_transition", { slideId: s6.slideId, transition: { type: "push", direction: "left" } });
+await tool("set_notes", { slideId: s6.slideId, notes: "Pause here — this is the ask setup." });
+// move the badge with the same tool the drag gesture uses
+const moved = await tool("set_frame", { elementId: badgeId, frame: { x: 1060, y: 40, w: 150, h: 150 } });
+check("overlay badge moved via set_frame", moved.rev > 0);
+
+// canvas: view the slide, then step through Present mode
+const page2 = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+await page2.goto(BASE);
+await page2.waitForSelector(".slide-frame");
+await page2.locator(".thumb").nth(5).click();
+await page2.waitForTimeout(300);
+await page2.screenshot({ path: join(outDir, "4-canvas-roadmap.png") });
+check(
+  "canvas renders native chevrons as SVG",
+  (await page2.locator("main svg path").count()) >= 3,
+);
+
+await page2.getByRole("button", { name: "▶ Present" }).click();
+await page2.waitForSelector(".present");
+await page2.waitForTimeout(600);
+await page2.screenshot({ path: join(outDir, "5-present-step0.png") });
+const chevronsHidden = !(await page2.locator(".present").getByText("Build").isVisible().catch(() => false));
+check("present mode: animated chevrons hidden before their click", chevronsHidden);
+await page2.keyboard.press("ArrowRight"); // chevrons fly in
+await page2.waitForTimeout(700);
+check("step 1 reveals the chevron group", await page2.locator(".present").getByText("Build").isVisible());
+await page2.keyboard.press("ArrowRight"); // first bullet fades
+await page2.waitForTimeout(400);
+const bullet2Hidden = !(await page2.locator(".present").getByText("Q2 — EU grocery pilots").isVisible().catch(() => false));
+check("byParagraph: second bullet still hidden after first click", bullet2Hidden);
+await page2.keyboard.press("ArrowRight"); // second bullet
+await page2.waitForTimeout(400);
+check("byParagraph: second bullet revealed on its own click", await page2.locator(".present").getByText("Q2 — EU grocery pilots").isVisible());
+await page2.keyboard.press("ArrowRight"); // third bullet
+await page2.keyboard.press("ArrowRight"); // table wipes in
+await page2.waitForTimeout(700);
+await page2.screenshot({ path: join(outDir, "6-present-mid.png") });
+await page2.keyboard.press("Escape");
+
+// ---------- 7. re-export with animations and verify the OpenXML ----------
+console.log("[7] exporting the animated deck");
+const pptx2 = await fetch(`${BASE}/api/export.pptx`);
+const buf2 = Buffer.from(await pptx2.arrayBuffer());
+writeFileSync(join(outDir, "Atlas Robotics — Series B.pptx"), buf2);
+const { execFileSync } = await import("node:child_process");
+const xdir = join(outDir, "pptx-x");
+execFileSync("unzip", ["-o", "-q", join(outDir, "Atlas Robotics — Series B.pptx"), "-d", xdir]);
+const { readFileSync } = await import("node:fs");
+const slide6xml = readFileSync(join(xdir, "ppt", "slides", "slide6.xml"), "utf8");
+check("pptx slide 6 has a push transition", slide6xml.includes("<p:push dir=\"l\"/>"));
+check("pptx slide 6 has an entrance timing tree", slide6xml.includes("<p:timing>") && slide6xml.includes('presetClass="entr"'));
+check("pptx slide 6 has per-bullet paragraph builds", slide6xml.includes('<p:pRg st="1" end="1"/>'));
+check("pptx slide 6 has a native table and chevrons", slide6xml.includes("<a:tbl>") && slide6xml.includes('prstGeom prst="chevron"'));
+check("pptx slide 6 has a gradient chevron", slide6xml.includes("<a:gradFill"));
+const notes6 = readFileSync(join(xdir, "ppt", "notesSlides", "notesSlide6.xml"), "utf8");
+check("pptx slide 6 carries presenter notes", notes6.includes("Pause here"));
 
 await browser.close();
 await ai.close();
