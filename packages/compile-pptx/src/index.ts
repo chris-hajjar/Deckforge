@@ -10,6 +10,8 @@
  * both PowerPoint and Google Slides (Arial, Georgia). No masters, no exotic
  * effects, so File → Import in Slides is lossless.
  */
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import PptxGenJS from "pptxgenjs";
 import type { Deck } from "@deckforge/schema";
 import { resolveTheme } from "@deckforge/themes";
@@ -122,6 +124,7 @@ export async function compileDeckToFile(deck: Deck, outPath: string): Promise<Re
   const tokens = resolveTheme(deck.theme);
   const resolved = deck.slides.map((s) => solveSlide(s, tokens));
   const pptx = compileResolved(resolved, deck.title);
+  mkdirSync(dirname(outPath), { recursive: true });
   await pptx.writeFile({ fileName: outPath });
   return resolved;
 }
