@@ -13,6 +13,11 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import PptxGenJS from "pptxgenjs";
+
+// pptxgenjs is CJS with an ESM wrapper; under node/tsx the default import is
+// the module object, under vite/vitest it's already the class. Unwrap once.
+const PptxCtor: typeof PptxGenJS =
+  (PptxGenJS as unknown as { default?: typeof PptxGenJS }).default ?? PptxGenJS;
 import type { Deck } from "@deckforge/schema";
 import { resolveTheme } from "@deckforge/themes";
 import {
@@ -66,7 +71,7 @@ export function compileResolved(
   slides: ResolvedSlide[],
   title: string,
 ): InstanceType<typeof PptxGenJS> {
-  const pptx = new PptxGenJS();
+  const pptx = new PptxCtor();
   pptx.defineLayout({ name: "DF_16x9", width: 13.333, height: 7.5 });
   pptx.layout = "DF_16x9";
   pptx.title = title;

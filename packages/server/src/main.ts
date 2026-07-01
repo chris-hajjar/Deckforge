@@ -30,6 +30,14 @@ log(`deck: ${join(projectDir, "deck.v2.json")} (rev ${store.rev})`);
 const here = dirname(fileURLToPath(import.meta.url));
 const canvasDist = resolve(here, "../../canvas/dist");
 const httpServer = createHttpServer(store, canvasDist);
+httpServer.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    log(`port ${port} is already in use — is another Deckforge running? (set DECKFORGE_PORT to change)`);
+  } else {
+    log("http server error:", err.message);
+  }
+  process.exit(1);
+});
 httpServer.listen(port, () => log(`canvas + API: http://localhost:${port}`));
 
 if (stdio) {

@@ -13,8 +13,12 @@
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import * as jsonpatch from "fast-json-patch";
+import fastJsonPatch from "fast-json-patch";
 import type { Operation } from "fast-json-patch";
+
+// fast-json-patch is CJS with an ESM wrapper; destructuring the default
+// import is the one form that resolves under both node/tsx and vitest/vite.
+const { applyPatch, compare, getValueByPointer } = fastJsonPatch;
 import { newDeck, type Deck, type ThemeTokens } from "@deckforge/schema";
 import { normalizeDeck, type Correction } from "@deckforge/validate";
 
@@ -71,11 +75,11 @@ export class DeckStore {
     // (e.g. setting style on an element that has none) is treated as `add`,
     // so UI knobs don't need to know whether a key already exists.
     const effective = structuredClone(patches).map((op) =>
-      op.op === "replace" && jsonpatch.getValueByPointer(this.deck, op.path) === undefined
+      op.op === "replace" && getValueByPointer(this.deck, op.path) === undefined
         ? { ...op, op: "add" as const }
         : op,
     );
-    const draft = jsonpatch.applyPatch(
+    const draft = applyPatch(
       structuredClone(this.deck) as Deck,
       effective,
       /* validateOperation */ true,
@@ -90,7 +94,7 @@ export class DeckStore {
   mutate(fn: (draft: Deck) => void, source: ChangeSource): ApplyResult {
     const draft = structuredClone(this.deck) as Deck;
     fn(draft);
-    const patches = jsonpatch.compare(this.deck, draft) as Operation[];
+    const patches = compare(this.deck, draft) as Operation[];
     if (patches.length === 0) {
       return { rev: this.rev, deck: this.deck, tokens: this.tokens, corrections: [] };
     }
