@@ -32,6 +32,10 @@ export const BoxStyleSchema = z
     padding: z.number().optional(), // px; snapped to spacingScale
     gap: z.number().optional(), // px; snapped to spacingScale
     radius: z.number().optional(), // px; snapped to theme radius steps
+    /** Main-axis distribution of leftover space (layout, not brand). */
+    justify: z.enum(["start", "center", "end", "between"]).optional(),
+    /** Cross-axis alignment of children. */
+    align: z.enum(["start", "center", "end", "stretch"]).optional(),
   })
   .strict();
 export type BoxStyle = z.infer<typeof BoxStyleSchema>;
