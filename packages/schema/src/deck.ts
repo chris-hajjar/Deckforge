@@ -118,6 +118,17 @@ const Base = {
  * - column children: intrinsic height by default; `grow` shares leftover space.
  * - row children: width shared by `weight` (default 1); `widthPct` pins a %.
  */
+/** Outer spacing on any flow element; each side snaps to the spacing scale. */
+export const MarginSchema = z
+  .object({
+    top: z.number().min(0).optional(),
+    bottom: z.number().min(0).optional(),
+    left: z.number().min(0).optional(),
+    right: z.number().min(0).optional(),
+  })
+  .strict();
+export type Margin = z.infer<typeof MarginSchema>;
+
 const SizingSchema = z
   .object({
     weight: z.number().positive().optional(),
@@ -125,6 +136,8 @@ const SizingSchema = z
     grow: z.number().positive().optional(),
     /** Fixed height in px (enables autoshrink for text inside). */
     height: z.number().positive().optional(),
+    /** Margin around the element, on any element, anywhere in the flow. */
+    margin: MarginSchema.optional(),
   })
   .strict();
 export type Sizing = z.infer<typeof SizingSchema>;
@@ -235,6 +248,29 @@ export const TableSchema = z
   })
   .strict();
 
+/** Chart types deliberately expose ONE value axis (dual axes are banned). */
+export const CHART_TYPES = ["column", "bar", "line", "area", "pie", "donut"] as const;
+export type ChartType = (typeof CHART_TYPES)[number];
+
+export const ChartSchema = z
+  .object({
+    ...Base,
+    type: z.literal("chart"),
+    chartType: z.enum(CHART_TYPES),
+    categories: z.array(z.string()).nonempty(),
+    /** Series colors come from the theme's validated chartPalette in slot
+     * order — identity follows the series, never a per-instance pick. */
+    series: z
+      .array(z.object({ name: z.string(), values: z.array(z.number()) }).strict())
+      .nonempty(),
+    /** Legend defaults on for ≥2 series, off for one (the title names it). */
+    legend: z.boolean().optional(),
+    /** Direct value labels; default on (contrast-relief rule for light fills). */
+    dataLabels: z.boolean().optional(),
+    sizing: SizingSchema.optional(),
+  })
+  .strict();
+
 export const SpacerSchema = z
   .object({
     ...Base,
@@ -271,6 +307,7 @@ export type LeafNode =
   | z.infer<typeof ImageSchema>
   | z.infer<typeof ShapeSchema>
   | z.infer<typeof TableSchema>
+  | z.infer<typeof ChartSchema>
   | z.infer<typeof SpacerSchema>;
 
 export type DeckNode = LeafNode | RowNode | ColumnNode;
@@ -303,6 +340,7 @@ export const NodeSchema: z.ZodType<DeckNode> = z.discriminatedUnion("type", [
   ImageSchema,
   ShapeSchema,
   TableSchema,
+  ChartSchema,
   SpacerSchema,
   RowSchema as never,
   ColumnSchema as never,

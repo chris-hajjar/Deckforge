@@ -353,6 +353,101 @@ check("pptx slide 6 has a gradient chevron", slide6xml.includes("<a:gradFill"));
 const notes6 = readFileSync(join(xdir, "ppt", "notesSlides", "notesSlide6.xml"), "utf8");
 check("pptx slide 6 carries presenter notes", notes6.includes("Pause here"));
 
+// ---------- 8. charts + margins ----------
+console.log("[8] building an analytics slide (charts + margin spacing)");
+const s8 = await tool("create_slide", { template: "blank", name: "Analytics" });
+await tool("add_element", {
+  slideId: s8.slideId,
+  element: { type: "heading", text: "The numbers", level: 2 },
+});
+await tool("add_element", {
+  slideId: s8.slideId,
+  element: {
+    type: "row",
+    style: { gap: 32 },
+    children: [
+      {
+        type: "chart",
+        chartType: "column",
+        categories: ["FY24", "FY25", "FY26"],
+        series: [
+          { name: "ARR ($M)", values: [1.1, 2.4, 4.2] },
+          { name: "Pipeline ($M)", values: [2.3, 4.0, 7.5] },
+        ],
+        sizing: { height: 360, margin: { top: 16 } },
+      },
+      {
+        type: "donutchart" as never, // wrong on purpose — schema must reject
+      },
+    ],
+  },
+}).then(
+  () => check("schema rejected an invalid chart element", false),
+  () => check("schema rejected an invalid chart element", true),
+);
+// the row failed atomically; add the valid version
+await tool("add_element", {
+  slideId: s8.slideId,
+  element: {
+    type: "row",
+    style: { gap: 32 },
+    children: [
+      {
+        type: "chart",
+        chartType: "column",
+        categories: ["FY24", "FY25", "FY26"],
+        series: [
+          { name: "ARR ($M)", values: [1.1, 2.4, 4.2] },
+          { name: "Pipeline ($M)", values: [2.3, 4.0, 7.5] },
+        ],
+        sizing: { height: 360, margin: { top: 16 } },
+      },
+      {
+        type: "chart",
+        chartType: "donut",
+        categories: ["Enterprise", "Mid-market", "SMB"],
+        series: [{ name: "Revenue mix", values: [55, 30, 15] }],
+        sizing: { height: 360, margin: { top: 16 }, weight: 0.7 },
+      },
+    ],
+  },
+});
+// margin snapping: off-scale margin gets snapped and reported
+const analytics = await tool("get_slide", { slideId: s8.slideId });
+const headingId8 = analytics.slide.root.children[0].id;
+const snapped = await tool("set_sizing", {
+  elementId: headingId8,
+  sizing: { margin: { bottom: 29 } },
+});
+check(
+  "margin snapped to brand spacing scale (29→32)",
+  snapped.corrections.some((c: { to: unknown }) => c.to === 32),
+  JSON.stringify(snapped.corrections),
+);
+
+const page3 = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+await page3.goto(BASE);
+await page3.waitForSelector(".slide-frame");
+await page3.locator(".thumb").nth(6).click();
+await page3.waitForTimeout(400);
+await page3.screenshot({ path: join(outDir, "7-canvas-charts.png") });
+check(
+  "canvas renders chart SVG marks",
+  (await page3.locator("main svg rect").count()) >= 6, // 2 series × 3 categories
+);
+await page3.close();
+
+// export and verify native chart parts
+const pptx3 = await fetch(`${BASE}/api/export.pptx`);
+writeFileSync(join(outDir, "Atlas Robotics — Series B.pptx"), Buffer.from(await pptx3.arrayBuffer()));
+const xdir3 = join(outDir, "pptx-x3");
+execSync(`unzip -o -q "${join(outDir, "Atlas Robotics — Series B.pptx")}" -d "${xdir3}"`);
+const chartFiles = (await import("node:fs")).readdirSync(join(xdir3, "ppt", "charts")).filter((f) => f.endsWith(".xml"));
+check("pptx contains native chart parts", chartFiles.length >= 2, `found ${chartFiles.length}`);
+const chartXml = chartFiles.map((f) => readFileSync(join(xdir3, "ppt", "charts", f), "utf8")).join("");
+check("charts are editable bar+doughnut XML", chartXml.includes("<c:barChart>") && chartXml.includes("<c:doughnutChart>"));
+check("chart series use the validated palette", chartXml.toUpperCase().includes("2A78D6"));
+
 await browser.close();
 await ai.close();
 

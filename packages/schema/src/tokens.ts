@@ -53,6 +53,13 @@ export const ThemeTokensSchema = z
     /** Allowed font sizes; free sizes snap to the nearest step. */
     fontSizeScale: z.array(z.number()).nonempty(),
     radius: z.object({ none: z.number(), sm: z.number(), md: z.number() }),
+    /**
+     * Categorical chart series colors, fixed order, assigned in sequence and
+     * never cycled (slot order is the colorblind-safety mechanism). Each
+     * theme's palette is validated against its surfaces with the dataviz
+     * six-checks validator — see docs/CHART-PALETTES.md.
+     */
+    chartPalette: z.array(HexColor).min(8),
   })
   .strict();
 

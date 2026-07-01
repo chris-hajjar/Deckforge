@@ -8,6 +8,7 @@
 import { useRef } from "react";
 import type { Operation } from "fast-json-patch";
 import {
+  CHART_TYPES,
   COLOR_ROLES,
   FONT_IDS,
   SHAPE_KINDS,
@@ -183,6 +184,90 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
       </>
     );
   };
+
+  /** Margin knobs on every flow element — spacing anywhere you need it. */
+  const marginSection = (n: DeckNode) => {
+    if (isOverlayRoot) return null; // overlays position by frame, not margin
+    const sizing = ((n as { sizing?: Record<string, unknown> }).sizing ?? {}) as Record<string, unknown>;
+    const margin = (sizing.margin ?? {}) as Record<string, number>;
+    const setSide = (side: string, v: number) => {
+      const next = { ...margin, [side]: v };
+      if (v === 0) delete next[side];
+      const nextSizing = { ...sizing, margin: Object.keys(next).length ? next : undefined };
+      if (!nextSizing.margin) delete nextSizing.margin;
+      sendDebounced([
+        { op: "replace", path: `${pointer}/sizing`, value: nextSizing } as Operation,
+      ]);
+    };
+    return (
+      <>
+        <label>Margin (snaps to brand scale)</label>
+        <div className="frame-grid">
+          {(["top", "bottom", "left", "right"] as const).map((side) => (
+            <label key={side} className="frame-field">
+              {side[0].toUpperCase()}
+              <input
+                type="number"
+                min={0}
+                value={margin[side] ?? 0}
+                onChange={(e) => setSide(side, Math.max(0, Number(e.target.value)))}
+              />
+            </label>
+          ))}
+        </div>
+      </>
+    );
+  };
+
+  const chartPanel = (n: Extract<DeckNode, { type: "chart" }>) => (
+    <>
+      <label>Chart type</label>
+      <Row>
+        {CHART_TYPES.map((t) => (
+          <button key={t} className={n.chartType === t ? "active" : ""} onClick={() => setField("chartType", t)}>
+            {t}
+          </button>
+        ))}
+      </Row>
+      <label>Data (line 1: categories | … — then one series per line: Name | v1 | v2 …)</label>
+      <textarea
+        key={n.id}
+        rows={6}
+        defaultValue={[
+          n.categories.join(" | "),
+          ...n.series.map((s) => [s.name, ...s.values].join(" | ")),
+        ].join("\n")}
+        onBlur={(e) => {
+          const lines = e.target.value.split("\n").map((l) => l.split("|").map((c) => c.trim())).filter((l) => l.some((c) => c));
+          if (lines.length < 2) return;
+          const categories = lines[0].filter((c) => c.length > 0);
+          const series = lines.slice(1).map((l) => ({
+            name: l[0] || "Series",
+            values: l.slice(1).map((v) => Number(v) || 0),
+          }));
+          sendPatches([
+            { op: "replace", path: `${pointer}/categories`, value: categories } as Operation,
+            { op: "replace", path: `${pointer}/series`, value: series } as Operation,
+          ]);
+        }}
+      />
+      <Row>
+        <button
+          className={(n.legend ?? n.series.length > 1) ? "active" : ""}
+          onClick={() => setField("legend", !(n.legend ?? n.series.length > 1))}
+        >
+          legend
+        </button>
+        <button className={(n.dataLabels ?? true) ? "active" : ""} onClick={() => setField("dataLabels", !(n.dataLabels ?? true))}>
+          value labels
+        </button>
+      </Row>
+      <p className="hint">
+        Series colors follow the theme's validated chart palette in fixed order (colorblind-safe by
+        construction). Exports as a native, editable PowerPoint chart.
+      </p>
+    </>
+  );
 
   const frameSection = (n: DeckNode) => {
     if (!isOverlayRoot || !n.frame) return null;
@@ -424,6 +509,7 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
           <button onClick={() => addChild(pointer!, { id: genId("metric"), type: "metricCard", label: "Metric", value: "0" })}>metric</button>
           <button onClick={() => addChild(pointer!, { id: genId("shape"), type: "shape", shape: "roundRect", fill: "accent", text: "Label" })}>shape</button>
           <button onClick={() => addChild(pointer!, { id: genId("table"), type: "table", rows: [["Col A", "Col B"], ["", ""]] })}>table</button>
+          <button onClick={() => addChild(pointer!, { id: genId("chart"), type: "chart", chartType: "column", categories: ["A", "B", "C"], series: [{ name: "Series 1", values: [3, 5, 4] }] })}>chart</button>
           <button onClick={() => addChild(pointer!, { id: genId("img"), type: "image", src: "", alt: "image" })}>image</button>
           <button onClick={() => addChild(pointer!, { id: genId("row"), type: "row", style: { gap: 16 }, children: [] })}>row</button>
           <button onClick={() => addChild(pointer!, { id: genId("col"), type: "column", style: { gap: 16 }, children: [] })}>column</button>
@@ -548,6 +634,7 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
           {node.type === "shape" && shapePanel(node)}
           {node.type === "image" && imagePanel(node)}
           {node.type === "table" && tablePanel(node)}
+          {node.type === "chart" && chartPanel(node)}
           {node.type === "spacer" && (
             <>
               <label>Size <span className="val">{node.size}px</span></label>
@@ -556,6 +643,7 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
             </>
           )}
           <hr />
+          {marginSection(node)}
           {animSection(node)}
         </>
       ) : (

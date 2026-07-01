@@ -203,6 +203,29 @@ function measureTable(ctx: Ctx, node: Extract<DeckNode, { type: "table" }>, widt
   return { colW, rowH, size };
 }
 
+/** Effective margin of a flow element (0 for overlays — frames are absolute). */
+function marginOf(node: DeckNode): { top: number; bottom: number; left: number; right: number } {
+  const m = (node as { sizing?: { margin?: Record<string, number> } }).sizing?.margin ?? {};
+  return { top: m.top ?? 0, bottom: m.bottom ?? 0, left: m.left ?? 0, right: m.right ?? 0 };
+}
+
+/** Outer height = margins + content height at the margin-reduced width. */
+function outerHeight(ctx: Ctx, node: DeckNode, slotWidth: number): number {
+  const m = marginOf(node);
+  return m.top + m.bottom + intrinsicHeight(ctx, node, Math.max(8, slotWidth - m.left - m.right));
+}
+
+/** Shrink a slot rect by the node's margin before laying it out. */
+function innerRect(node: DeckNode, slot: Rect): Rect {
+  const m = marginOf(node);
+  return {
+    x: slot.x + m.left,
+    y: slot.y + m.top,
+    w: Math.max(8, slot.w - m.left - m.right),
+    h: Math.max(8, slot.h - m.top - m.bottom),
+  };
+}
+
 // ---------- intrinsic heights ----------
 function intrinsicHeight(ctx: Ctx, node: DeckNode, width: number): number {
   const fixed = (node as { sizing?: { height?: number } }).sizing?.height;
@@ -231,6 +254,8 @@ function intrinsicHeight(ctx: Ctx, node: DeckNode, width: number): number {
       const m = measureTable(ctx, node, width);
       return m.rowH.reduce((a, b) => a + b, 0);
     }
+    case "chart":
+      return Math.round(width * 0.5);
     case "spacer":
       return node.size;
     case "row": {
@@ -238,7 +263,7 @@ function intrinsicHeight(ctx: Ctx, node: DeckNode, width: number): number {
       const widths = rowChildWidths(ctx, node, width - pad * 2);
       let max = 0;
       node.children.forEach((child, i) => {
-        max = Math.max(max, intrinsicHeight(ctx, child, widths[i]));
+        max = Math.max(max, outerHeight(ctx, child, widths[i]));
       });
       return max + pad * 2;
     }
@@ -248,7 +273,7 @@ function intrinsicHeight(ctx: Ctx, node: DeckNode, width: number): number {
       const inner = width - pad * 2;
       let sum = 0;
       node.children.forEach((child, i) => {
-        sum += intrinsicHeight(ctx, child, inner);
+        sum += outerHeight(ctx, child, inner);
         if (i < node.children.length - 1) sum += gap;
       });
       return sum + pad * 2;
@@ -318,7 +343,7 @@ function layoutColumn(ctx: Ctx, node: ColumnNode, rect: Rect, z: number) {
     w: rect.w - pad * 2,
     h: rect.h - pad * 2,
   };
-  const heights = node.children.map((c) => intrinsicHeight(ctx, c, inner.w));
+  const heights = node.children.map((c) => outerHeight(ctx, c, inner.w));
   const gapsTotal = gap * Math.max(0, node.children.length - 1);
   const growTotal = node.children.reduce(
     (s, c) => s + ((c as { sizing?: { grow?: number } }).sizing?.grow ?? 0),
@@ -351,7 +376,7 @@ function layoutColumn(ctx: Ctx, node: ColumnNode, rect: Rect, z: number) {
 
   withAnim(ctx, node, () => {
     node.children.forEach((child, i) => {
-      layoutNode(ctx, child, { x: inner.x, y, w: inner.w, h: assigned[i] }, z + 1);
+      layoutNode(ctx, child, innerRect(child, { x: inner.x, y, w: inner.w, h: assigned[i] }), z + 1);
       y += assigned[i] + between;
     });
   });
@@ -375,11 +400,11 @@ function layoutRow(ctx: Ctx, node: RowNode, rect: Rect, z: number) {
       let h = inner.h;
       let y = inner.y;
       if (align !== "stretch") {
-        h = Math.min(inner.h, intrinsicHeight(ctx, child, widths[i]));
+        h = Math.min(inner.h, outerHeight(ctx, child, widths[i]));
         if (align === "center") y += (inner.h - h) / 2;
         else if (align === "end") y += inner.h - h;
       }
-      layoutNode(ctx, child, { x, y, w: widths[i], h }, z + 1);
+      layoutNode(ctx, child, innerRect(child, { x, y, w: widths[i], h }), z + 1);
       x += widths[i] + gap;
     });
   });
@@ -602,6 +627,45 @@ function layoutTable(ctx: Ctx, node: Extract<DeckNode, { type: "table" }>, rect:
   });
 }
 
+function layoutChart(ctx: Ctx, node: Extract<DeckNode, { type: "chart" }>, rect: Rect, z: number) {
+  const t = ctx.tokens;
+  // categorical slots in fixed order, never cycled (validate caps series at 8)
+  const series = node.series.map((s, i) => ({
+    name: s.name,
+    values: s.values,
+    color: t.chartPalette[i],
+  }));
+  ctx.boxes.push({
+    kind: "chart",
+    id: `box-${ctx.seq++}`,
+    nodeId: node.id,
+    x: rect.x,
+    y: rect.y,
+    w: rect.w,
+    h: rect.h,
+    z: z + 50,
+    anim: animOf(ctx, node),
+    chartType: node.chartType,
+    categories: node.categories,
+    series,
+    palette: [...t.chartPalette],
+    // legend defaults on for ≥2 series, off for one (the title names it) —
+    // except pie/donut, where slice identity is color-alone without one
+    legend:
+      node.legend ??
+      (node.series.length > 1 || node.chartType === "pie" || node.chartType === "donut"),
+    // direct labels default on: the light palette's contrast-relief rule
+    dataLabels: node.dataLabels ?? true,
+    fontId: t.fonts.body,
+    ink: {
+      label: t.colors["text-primary"],
+      muted: t.colors["text-secondary"],
+      grid: t.colors["surface-alt"],
+    },
+    surface: t.colors.background,
+  });
+}
+
 function layoutNode(ctx: Ctx, node: DeckNode, rect: Rect, z: number) {
   switch (node.type) {
     case "column":
@@ -618,6 +682,8 @@ function layoutNode(ctx: Ctx, node: DeckNode, rect: Rect, z: number) {
       return layoutShape(ctx, node, rect, z);
     case "table":
       return layoutTable(ctx, node, rect, z);
+    case "chart":
+      return layoutChart(ctx, node, rect, z);
     case "image":
       ctx.boxes.push({
         kind: "image",

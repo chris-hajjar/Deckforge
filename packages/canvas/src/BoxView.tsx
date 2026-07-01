@@ -5,7 +5,8 @@
  * mode (which passes reveal state for animations).
  */
 import type { CSSProperties } from "react";
-import type { ResolvedBox, ResolvedGradient, ShapeBox, TableBox, TextBox } from "@deckforge/layout";
+import type { ChartBox, ResolvedBox, ResolvedGradient, ShapeBox, TableBox, TextBox } from "@deckforge/layout";
+import { ChartView } from "./ChartView.js";
 
 export const FONT_STACKS: Record<string, string> = {
   sans: 'Arial, "Liberation Sans", Helvetica, sans-serif',
@@ -159,6 +160,14 @@ export function BoxView({ box, scale, paraVisible, animClass, style: extra }: Pr
           background: "#dddddd",
         }}
       />
+    );
+  }
+
+  if (box.kind === "chart") {
+    return (
+      <div className={cls} style={base}>
+        <ChartView box={box as ChartBox} scale={scale} />
+      </div>
     );
   }
 

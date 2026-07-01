@@ -124,9 +124,12 @@ describe("pptx customization", () => {
     const dir = mkdtempSync(join(tmpdir(), "deckforge-anim-"));
     const file = join(dir, "custom.pptx");
     await compileDeckToFile(deck, file);
-    execFileSync("soffice", ["--headless", "--convert-to", "pdf", file, "--outdir", dir], {
-      timeout: 90000,
-    });
+    // isolated profile: parallel soffice instances can't share a user dir
+    execFileSync(
+      "soffice",
+      [`-env:UserInstallation=file://${dir}/lo-profile`, "--headless", "--convert-to", "pdf", file, "--outdir", dir],
+      { timeout: 90000 },
+    );
     expect(existsSync(join(dir, "custom.pdf"))).toBe(true);
   }, 120000);
 

@@ -206,10 +206,21 @@ export function normalizeDeck(input: unknown): NormalizeResult {
     fixScale(slide as never, "padding", sp, tokens.spacingScale, "slide padding");
   });
 
+  /** Snap every margin side to the spacing scale (spacing, anywhere). */
+  const fixMargin = (node: Record<string, unknown>, pointer: string) => {
+    const sizing = node.sizing as Record<string, unknown> | undefined;
+    const margin = sizing?.margin as Record<string, unknown> | undefined;
+    if (!margin) return;
+    for (const side of ["top", "bottom", "left", "right"]) {
+      fixScale(margin, side, `${pointer}/sizing/margin`, tokens.spacingScale, `margin-${side}`);
+    }
+  };
+
   // element-level props
   for (const { node, pointer } of walkDeck(deck)) {
     const style = (node as { style?: Record<string, unknown> }).style;
     clampFrame(node as never, pointer, /\/overlays\/\d+$/.test(pointer));
+    fixMargin(node as never, pointer);
     switch (node.type) {
       case "heading":
       case "text":
@@ -231,6 +242,36 @@ export function normalizeDeck(input: unknown): NormalizeResult {
       case "table":
         fixTextStyle(style, pointer);
         break;
+      case "chart": {
+        // every series must have exactly one value per category
+        const nCats = node.categories.length;
+        node.series.forEach((s, si) => {
+          if (s.values.length !== nCats) {
+            const fixed = [...s.values.slice(0, nCats)];
+            while (fixed.length < nCats) fixed.push(0);
+            corrections.push({
+              pointer: `${pointer}/series/${si}`,
+              field: "values",
+              from: [...s.values],
+              to: fixed,
+              reason: `series "${s.name}" padded/trimmed to ${nCats} values (one per category)`,
+            });
+            s.values = fixed;
+          }
+        });
+        // categorical slots are fixed and never cycled: >8 series folds down
+        if (node.series.length > 8) {
+          corrections.push({
+            pointer,
+            field: "series",
+            from: node.series.length,
+            to: 8,
+            reason: "charts cap at 8 series (fixed categorical slots are the colorblind-safety mechanism); fold extras into 'Other' or split into small multiples",
+          });
+          node.series = node.series.slice(0, 8) as typeof node.series;
+        }
+        break;
+      }
       case "row":
       case "column":
         if (style) {

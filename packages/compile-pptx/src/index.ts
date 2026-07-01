@@ -20,6 +20,7 @@ import {
   CANVAS_W,
   fontFamily,
   solveSlide,
+  type ChartBox,
   type ImageBox,
   type ResolvedSlide,
   type TableBox,
@@ -118,6 +119,97 @@ function addTable(pptxSlide: PptxGenJS.Slide, box: TableBox) {
     margin: inch(box.cellPad),
     valign: "middle",
   });
+}
+
+/**
+ * Native, fully editable PowerPoint chart. Colors are the theme's validated
+ * categorical palette in slot order; ink stays in text tokens; one value
+ * axis by construction. Geometry note: PowerPoint draws its own axes, so a
+ * chart is semantically identical to the canvas preview (type, data, colors,
+ * labels) rather than pixel-identical like every other element.
+ */
+function addChart(pptxSlide: PptxGenJS.Slide, box: ChartBox) {
+  const isPieLike = box.chartType === "pie" || box.chartType === "donut";
+  const data = isPieLike
+    ? [
+        {
+          name: box.series[0]?.name ?? "Series",
+          labels: box.categories,
+          values: box.series[0]?.values ?? [],
+        },
+      ]
+    : box.series.map((s) => ({ name: s.name, labels: box.categories, values: s.values }));
+
+  const chartColors = isPieLike
+    ? box.categories.map((_, i) => hex(box.palette[i % box.palette.length]))
+    : box.series.map((s) => hex(s.color));
+
+  const common: PptxGenJS.IChartOpts = {
+    x: inch(box.x),
+    y: inch(box.y),
+    w: inch(box.w),
+    h: inch(box.h),
+    chartColors,
+    fontFace: fontFamily(box.fontId),
+    showLegend: box.legend,
+    legendPos: "b",
+    legendColor: hex(box.ink.muted),
+    legendFontSize: 10,
+    catAxisLabelColor: hex(box.ink.muted),
+    catAxisLabelFontSize: 10,
+    valAxisLabelColor: hex(box.ink.muted),
+    valAxisLabelFontSize: 10,
+    valGridLine: { color: hex(box.ink.grid), style: "solid", size: 0.5 },
+    catGridLine: { style: "none" },
+    valAxisLineShow: false,
+    catAxisLineColor: hex(box.ink.grid),
+    dataLabelColor: hex(box.ink.muted),
+    dataLabelFontSize: 10,
+    plotArea: { border: { none: true } as never },
+  };
+
+  switch (box.chartType) {
+    case "column":
+    case "bar":
+      pptxSlide.addChart("bar" as PptxGenJS.CHART_NAME, data, {
+        ...common,
+        barDir: box.chartType === "column" ? "col" : "bar",
+        barGapWidthPct: 60, // thin marks
+        barOverlapPct: -8, // surface gap between adjacent bars in a group
+        showValue: box.dataLabels,
+        dataLabelPosition: "outEnd",
+      });
+      break;
+    case "line":
+      pptxSlide.addChart("line" as PptxGenJS.CHART_NAME, data, {
+        ...common,
+        lineSize: 2,
+        lineDataSymbol: "circle",
+        lineDataSymbolSize: 6, // ≥8px markers
+        showValue: false, // selective labels: never a number on every point
+      });
+      break;
+    case "area":
+      pptxSlide.addChart("area" as PptxGenJS.CHART_NAME, data, {
+        ...common,
+        chartColorsOpacity: 35,
+        showValue: false,
+      });
+      break;
+    case "pie":
+    case "donut":
+      pptxSlide.addChart(
+        (box.chartType === "pie" ? "pie" : "doughnut") as PptxGenJS.CHART_NAME,
+        data,
+        {
+          ...common,
+          holeSize: box.chartType === "donut" ? 60 : undefined,
+          showValue: box.dataLabels,
+          dataBorder: { pt: 1.5, color: hex(box.surface) }, // 2px surface gap
+        } as PptxGenJS.IChartOpts,
+      );
+      break;
+  }
 }
 
 /** Prefetch remote images to base64 so the pptx embeds real pixels. */
@@ -275,6 +367,10 @@ export function compileResolved(
           break;
         case "table":
           addTable(s, box);
+          manifest.drawables.push({ anim: box.anim });
+          break;
+        case "chart":
+          addChart(s, box);
           manifest.drawables.push({ anim: box.anim });
           break;
         case "image": {

@@ -369,6 +369,7 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
           "src", "alt", "fit", "size", "background",
           "shape", "fill", "gradient", "border", "shadow", "textStyle",
           "rows", "header", "columns",
+          "chartType", "categories", "series", "legend", "dataLabels",
         ]);
         const result = store.mutate((draft) => {
           const visit = findNode(draft, elementId);

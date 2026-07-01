@@ -84,7 +84,15 @@ dir.
 Element types: `heading`, `text`, `bulletList` (bullets or numbered), `metricCard`,
 `image` (embedded, cover/contain), `shape` (rect, roundRect, ellipse, triangle,
 diamond, chevron, rightArrow, pill, line — with labels, gradients, borders,
-shadows), `table` (native, brand-styled header + zebra), `row`/`column`, `spacer`.
+shadows), `table` (native, brand-styled header + zebra), `chart` (column, bar,
+line, area, pie, donut — exported as native editable PowerPoint charts, series
+colors from a colorblind-validated per-theme palette, see
+[docs/CHART-PALETTES.md](docs/CHART-PALETTES.md)), `row`/`column`, `spacer`.
+
+Spacing anywhere: besides container `padding`/`gap`, slide `padding` and
+`spacer` elements, **every element takes `sizing.margin`**
+(`{top, bottom, left, right}`) — snapped to the brand spacing scale, editable
+from the inspector's margin grid on any selected element.
 
 Styling: token colors, two-stop gradients, borders, shadows, corner radius,
 per-element font (sans/serif/mono), lineHeight, letterSpacing, uppercase,

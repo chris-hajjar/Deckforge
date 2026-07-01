@@ -5,7 +5,7 @@
  * renderer and the pptx compiler consume ONLY this — neither ever sees the
  * tree — which is what makes preview and export identical by construction.
  */
-import type { FontId, ShapeKind, Transition } from "@deckforge/schema";
+import type { ChartType, FontId, ShapeKind, Transition } from "@deckforge/schema";
 import { CANVAS_H, CANVAS_W } from "@deckforge/schema";
 
 export { CANVAS_H, CANVAS_W };
@@ -117,7 +117,29 @@ export interface TableBox extends BoxBase {
   cellPad: number;
 }
 
-export type ResolvedBox = RectBox | ShapeBox | TextBox | ImageBox | TableBox;
+export interface ChartSeries {
+  name: string;
+  values: number[];
+  /** Resolved hex from the theme's validated chartPalette, in slot order. */
+  color: string;
+}
+
+export interface ChartBox extends BoxBase {
+  kind: "chart";
+  chartType: ChartType;
+  categories: string[];
+  series: ChartSeries[];
+  /** Full categorical palette (pie/donut slices walk it per category). */
+  palette: string[];
+  legend: boolean;
+  dataLabels: boolean;
+  fontId: FontId;
+  /** Ink roles resolved to hex (text stays in text tokens, never series color). */
+  ink: { label: string; muted: string; grid: string };
+  surface: string; // hex the chart sits on (for mark gaps)
+}
+
+export type ResolvedBox = RectBox | ShapeBox | TextBox | ImageBox | TableBox | ChartBox;
 
 export interface ResolvedSlide {
   id: string;
