@@ -21,7 +21,10 @@ import { THEMES } from "@deckforge/themes";
 import { solveSlide } from "@deckforge/layout";
 import { compileDeckToFile } from "@deckforge/compile-pptx";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { DeckStore, ApplyResult } from "./store.js";
+import type { Library } from "./library.js";
+import { importPptx } from "./import-pptx.js";
 
 const ok = (payload: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
@@ -152,7 +155,12 @@ const ElementInput = z
       COLOR_ROLES.join(", "),
   );
 
-export function registerTools(server: McpServer, store: DeckStore, projectDir: string) {
+export function registerTools(
+  server: McpServer,
+  store: DeckStore,
+  projectDir: string,
+  library: Library,
+) {
   // ---------- read ----------
   server.registerTool(
     "get_design_system",
@@ -167,6 +175,8 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
         activeTheme: store.deck.theme,
         tokens: store.tokens,
         availableThemes: Object.keys(THEMES),
+        customThemes: [...library.customThemes],
+        templates: library.list(),
         componentRules: {
           metricCard:
             "value always renders accent color + bold at metricValue size; label auto-uppercases in text-secondary; only label/value/delta/background are settable",
@@ -228,9 +238,9 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
     "create_slide",
     {
       description:
-        "Add a slide from a structural template: blank | title | bullets | metrics | split.",
+        "Add a slide from a template: a built-in structural one (blank | title | bullets | metrics | split) or ANY registered library template by name (see list_templates). Library templates are instantiated with fresh ids.",
       inputSchema: {
-        template: z.enum(["blank", "title", "bullets", "metrics", "split"]).default("blank"),
+        template: z.string().default("blank"),
         name: z.string().optional(),
         afterSlideId: z.string().optional(),
       },
@@ -239,7 +249,9 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
       try {
         let created = "";
         const result = store.mutate((draft) => {
-          const slide = slideTemplate(draft, template, name);
+          const slide = library.templates.has(template)
+            ? { ...library.instantiate(draft, template), ...(name ? { name } : {}) }
+            : slideTemplate(draft, template, name);
           created = slide.id;
           const at = afterSlideId
             ? draft.slides.findIndex((s) => s.id === afterSlideId) + 1
@@ -250,6 +262,142 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
           slideId: created,
           tree: nodeSummary(requireSlide(result.deck, created).root),
         });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  // ---------- design library ----------
+  server.registerTool(
+    "register_theme",
+    {
+      description:
+        "Register a design system as a named theme, persisted in the project library and usable by set_theme. Easiest form: {name, base: 'corporate-bold', colors: {...hex by role}, fonts: {...}} — everything not given inherits from the base (including the validated chart palette). Full ThemeTokens documents are also accepted (omit base).",
+      inputSchema: {
+        name: z.string(),
+        base: z.string().optional(),
+        colors: z.record(z.string(), z.string()).optional(),
+        fonts: z.record(z.string(), z.string()).optional(),
+        fontSizes: z.record(z.string(), z.number()).optional(),
+        radius: z.record(z.string(), z.number()).optional(),
+        spacingScale: z.array(z.number()).optional(),
+        fontSizeScale: z.array(z.number()).optional(),
+        chartPalette: z.array(z.string()).optional(),
+      },
+    },
+    async (input) => {
+      try {
+        const clean = Object.fromEntries(
+          Object.entries(input).filter(([, v]) => v !== undefined),
+        );
+        const tokens = library.saveTheme(clean as { base?: string } & Record<string, unknown>);
+        return ok({
+          registered: tokens.name,
+          tokens,
+          note:
+            "Activate with set_theme {base: '" +
+            tokens.name +
+            "'}. If you replaced chartPalette, re-validate it for colorblind safety (docs/CHART-PALETTES.md).",
+        });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "register_template",
+    {
+      description:
+        "Register a reusable slide template from slide JSON ({root, overlays?, background?, padding?, ...}; element ids optional). Persisted in the project library; create_slide can then stamp it out by name any number of times.",
+      inputSchema: {
+        name: z.string(),
+        description: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        slide: z.record(z.string(), z.unknown()),
+      },
+    },
+    async ({ name, description, tags, slide }) => {
+      try {
+        const tpl = library.saveTemplate(name, slide, description, tags);
+        return ok({ registered: tpl.name, templates: library.list() });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "save_slide_as_template",
+    {
+      description:
+        "Capture an existing slide of the current deck as a named library template — design once (AI or canvas), reuse forever.",
+      inputSchema: {
+        slideId: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+      },
+    },
+    async ({ slideId, name, description, tags }) => {
+      try {
+        const slide = requireSlide(store.deck, slideId);
+        const tpl = library.saveTemplate(name, slide, description, tags);
+        return ok({ registered: tpl.name, templates: library.list() });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_templates",
+    {
+      description: "List registered library templates (name, description, tags) plus the built-in structural ones.",
+      inputSchema: {},
+    },
+    async () =>
+      ok({
+        builtin: ["blank", "title", "bullets", "metrics", "split"],
+        library: library.list(),
+      }),
+  );
+
+  server.registerTool(
+    "import_pptx_templates",
+    {
+      description:
+        "Import an existing PowerPoint/Google Slides deck (.pptx — Google Slides: File → Download → .pptx) as library templates, one per slide: text, shapes, lines and embedded images land as freeform elements at their exact positions. Colors re-brand to the active tokens when a template is used. Charts/tables/gradient fills are skipped with notes.",
+      inputSchema: {
+        path: z.string().describe("Absolute path to the .pptx file"),
+        namePrefix: z.string().optional().describe("Template names become '<prefix> N' (default: file name)"),
+      },
+    },
+    async ({ path, namePrefix }) => {
+      try {
+        const imported = await importPptx(readFileSync(path));
+        const prefix = namePrefix ?? path.split("/").pop()!.replace(/\.pptx$/i, "");
+        const registered: Array<{ name: string; elements: number; notes: string[] }> = [];
+        imported.forEach((imp, i) => {
+          const name = `${prefix} ${i + 1}`;
+          library.saveTemplate(name, imp.slide, `Imported from ${path.split("/").pop()}`);
+          registered.push({ name, elements: imp.slide.overlays?.length ?? 0, notes: imp.notes });
+        });
+        return ok({ imported: registered.length, templates: registered });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_template",
+    { description: "Remove a template from the project library.", inputSchema: { name: z.string() } },
+    async ({ name }) => {
+      try {
+        library.deleteTemplate(name);
+        return ok({ deleted: name, templates: library.list() });
       } catch (e) {
         return fail((e as Error).message);
       }
@@ -653,6 +801,15 @@ export function registerTools(server: McpServer, store: DeckStore, projectDir: s
     { description: "Resolved brand tokens for the active theme", mimeType: "application/json" },
     async (uri) => ({
       contents: [{ uri: uri.href, text: JSON.stringify(store.tokens, null, 2) }],
+    }),
+  );
+
+  server.registerResource(
+    "design-templates",
+    "design-system://templates",
+    { description: "Registered slide templates in the project library", mimeType: "application/json" },
+    async (uri) => ({
+      contents: [{ uri: uri.href, text: JSON.stringify(library.list(), null, 2) }],
     }),
   );
 

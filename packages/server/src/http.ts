@@ -12,8 +12,9 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Operation } from "fast-json-patch";
 import { compileDeckToBuffer } from "@deckforge/compile-pptx";
 import type { DeckStore } from "./store.js";
+import type { Library } from "./library.js";
 
-export function createHttpServer(store: DeckStore, canvasDist: string): Server {
+export function createHttpServer(store: DeckStore, canvasDist: string, library: Library): Server {
   const app = express();
   app.use(express.json({ limit: "4mb" }));
 
@@ -34,6 +35,58 @@ export function createHttpServer(store: DeckStore, canvasDist: string): Server {
       res.status(422).json({ error: (e as Error).message });
     }
   });
+
+  app.get("/api/templates", (_req, res) => {
+    res.json({ templates: library.list() });
+  });
+
+  // save an existing slide of the deck as a library template
+  app.post("/api/templates", (req, res) => {
+    const { slideId, name, description } = req.body ?? {};
+    try {
+      const slide = store.deck.slides.find((s) => s.id === slideId);
+      if (!slide) throw new Error(`No slide "${slideId}"`);
+      if (!name) throw new Error("name is required");
+      library.saveTemplate(name, slide, description);
+      res.json({ templates: library.list() });
+    } catch (e) {
+      res.status(422).json({ error: (e as Error).message });
+    }
+  });
+
+  // add a slide from a library template (fresh ids), the canvas path
+  app.post("/api/slides", (req, res) => {
+    const { template } = req.body ?? {};
+    try {
+      const result = store.mutate((draft) => {
+        draft.slides.push(library.instantiate(draft, template));
+      }, "human");
+      res.json({ rev: result.rev, corrections: result.corrections });
+    } catch (e) {
+      res.status(422).json({ error: (e as Error).message });
+    }
+  });
+
+  // upload a .pptx (PowerPoint or Google Slides export) → library templates
+  app.post(
+    "/api/import",
+    express.raw({ type: () => true, limit: "60mb" }),
+    async (req, res) => {
+      try {
+        const { importPptx } = await import("./import-pptx.js");
+        const imported = await importPptx(req.body as Buffer);
+        const prefix = String(req.query.name ?? "imported");
+        const names = imported.map((imp, i) => {
+          const name = `${prefix} ${i + 1}`;
+          library.saveTemplate(name, imp.slide, "Imported upload");
+          return name;
+        });
+        res.json({ imported: names, templates: library.list() });
+      } catch (e) {
+        res.status(422).json({ error: (e as Error).message });
+      }
+    },
+  );
 
   app.get("/api/export.pptx", async (_req, res) => {
     try {

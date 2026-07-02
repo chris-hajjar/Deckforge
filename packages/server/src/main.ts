@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { DeckStore } from "./store.js";
+import { Library } from "./library.js";
 import { registerTools } from "./tools.js";
 import { createHttpServer } from "./http.js";
 
@@ -24,12 +25,18 @@ const port = Number(process.env.DECKFORGE_PORT ?? 4820);
 // stdout belongs to MCP in stdio mode — everything human goes to stderr.
 const log = (...parts: unknown[]) => console.error("[deckforge]", ...parts);
 
+// library first: custom themes must be registered before the deck (which may
+// reference one) is loaded and validated
+const library = new Library(projectDir);
+log(
+  `library: ${library.customThemes.size} custom theme(s), ${library.templates.size} template(s)`,
+);
 const store = new DeckStore(join(projectDir, "deck.v2.json"));
 log(`deck: ${join(projectDir, "deck.v2.json")} (rev ${store.rev})`);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const canvasDist = resolve(here, "../../canvas/dist");
-const httpServer = createHttpServer(store, canvasDist);
+const httpServer = createHttpServer(store, canvasDist, library);
 httpServer.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
     log(`port ${port} is already in use — is another Deckforge running? (set DECKFORGE_PORT to change)`);
@@ -42,7 +49,7 @@ httpServer.listen(port, () => log(`canvas + API: http://localhost:${port}`));
 
 if (stdio) {
   const mcp = new McpServer({ name: "deckforge", version: "2.0.0" });
-  registerTools(mcp, store, projectDir);
+  registerTools(mcp, store, projectDir, library);
   await mcp.connect(new StdioServerTransport());
   log("MCP connected over stdio");
 } else {

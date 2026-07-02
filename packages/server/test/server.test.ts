@@ -10,6 +10,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { DeckStore } from "../src/store.js";
+import { Library } from "../src/library.js";
 import { registerTools } from "../src/tools.js";
 
 function tempStore(): { store: DeckStore; dir: string } {
@@ -75,7 +76,7 @@ describe("MCP tool surface", () => {
     const t = tempStore();
     store = t.store;
     const server = new McpServer({ name: "deckforge-test", version: "2.0.0" });
-    registerTools(server, store, t.dir);
+    registerTools(server, store, t.dir, new Library(t.dir));
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: "test-client", version: "1.0.0" });
     await Promise.all([server.connect(serverT), client.connect(clientT)]);

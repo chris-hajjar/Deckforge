@@ -710,6 +710,23 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
             <button onClick={() => addOverlay({ id: genId("img"), type: "image", src: "", alt: "image" }, { x: 480, y: 240, w: 320, h: 240 })}>image</button>
             <button onClick={() => addOverlay({ id: genId("line"), type: "shape", shape: "line", fill: "accent" }, { x: 320, y: 360, w: 640, h: 8 })}>line</button>
           </Row>
+          <label>Template</label>
+          <Row>
+            <button
+              onClick={async () => {
+                const name = window.prompt("Save this slide as a template named:", slide.name ?? slide.id);
+                if (!name) return;
+                const res = await fetch("/api/templates", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ slideId: slide.id, name }),
+                });
+                if (!res.ok) alert((await res.json()).error);
+              }}
+            >
+              save slide as template
+            </button>
+          </Row>
           <label>Presenter notes</label>
           <textarea key={`${slide.id}-notes`} rows={4} defaultValue={slide.notes ?? ""}
             onBlur={(e) => setSlideField("notes", e.target.value || undefined)} />

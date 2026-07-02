@@ -1,139 +1,132 @@
-# Deckforge v2
+# Deckforge
 
-**Retool for presentations.** An MCP server holds a validated JSON deck as the
-single source of truth; an AI assistant builds and edits it through tools; a
-live canvas app beside the chat lets you click any element and turn
-brand-constrained knobs; and Export produces a `.pptx` of native editable
-shapes that matches the preview exactly — open it in PowerPoint, or import it
-into Google Slides losslessly.
+**AI-native presentation builder.** An AI assistant and a visual editor work on
+the same live deck — the AI through MCP tools, you through a Retool-style
+canvas — and everything obeys your design system. Export a `.pptx` that matches
+the preview and opens fully editable in PowerPoint or Google Slides.
 
 ```
-AI tool call ─┐
-              ├→ JSON Patch → validate → auto-correct → apply → broadcast (WS)
-canvas knob ──┘                                            │
-                                              deterministic layout solver
-                                                │                     │
-                                          canvas renders        .pptx compiles
-                                          the same boxes        the same boxes
+you: "make me a 5-slide pitch deck from this brief, in our brand"
+         │
+   AI (MCP tools) ──┐
+                    ├─→ one validated deck state ─→ live canvas (edit anything)
+   you (canvas) ────┘                            └→ .pptx / Present mode
 ```
-
-Full design rationale: [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md).
-(v1 lives in [legacy/](legacy/).)
-
-## Why the preview and the .pptx are identical
-
-Deckforge owns layout. A deterministic solver (with precomputed font metrics —
-no browser, no font files at runtime) resolves the deck tree into absolute
-boxes on a 1280×720 canvas. The web canvas renders those boxes as positioned
-divs; the pptx compiler emits shapes at the same coordinates. The golden tests
-unzip the OpenXML and assert the EMU coordinates equal the solver's output.
 
 ## Quick start
 
 ```bash
 npm install
-npm run build:canvas          # build the visual editor once
-npm run serve                 # http://localhost:4820 — canvas + API + WS
-npm test                      # 45 tests across all packages
-npx tsx e2e/pitch-demo.ts     # full journey: AI builds a deck, human edits, export
+npm run build:canvas     # build the visual editor (once)
+npm run serve            # → http://localhost:4820
+npm test                 # 74 tests
 ```
 
-### Hook up an AI (MCP over stdio)
-
-Register in Claude Desktop / Claude Code:
+Connect an AI (Claude Desktop / Claude Code — MCP over stdio):
 
 ```json
 {
   "mcpServers": {
     "deckforge": {
       "command": "npx",
-      "args": ["tsx", "/abs/path/Deckforge/packages/server/src/main.ts", "/abs/path/to/your/deck/project", "--stdio"]
+      "args": ["tsx", "/path/to/Deckforge/packages/server/src/main.ts", "/path/to/your/project", "--stdio"]
     }
   }
 }
 ```
 
-One process serves both the MCP tools and the canvas — the AI and the human
-edit the same live state. The deck persists as `deck.v2.json` in the project
-dir.
+One process serves both the AI tools and the canvas at `localhost:4820` — both
+edit the same live deck. Everything persists in your project dir:
+`deck.v2.json` (the deck) and `library/` (your themes and templates).
 
-## The pieces
+## How it works
 
-| Package | What it is |
+1. **One source of truth.** The deck is a JSON tree of slides and elements.
+   Every edit — AI tool call or canvas knob — becomes a JSON Patch that is
+   schema-validated, brand-corrected, applied, logged, and broadcast live.
+2. **The brand engine.** Colors are token roles (`accent`, `surface`…), sizes
+   snap to scales. Off-brand values (a raw hex, a 13px padding) are snapped to
+   the nearest brand standard and the correction is reported — to the AI and
+   on screen. Nobody can break the design system, including the AI.
+3. **Deterministic layout.** A solver resolves every slide to absolute boxes
+   on a 1280×720 canvas using precomputed font metrics. The web preview and
+   the .pptx are drawn from the same boxes, so they match by construction.
+4. **Mutual awareness.** The AI reads what you changed (`get_changes_since`);
+   the canvas re-renders what the AI changed over WebSocket, instantly.
+5. **Real export.** Native shapes, editable text, real tables, real editable
+   charts, speaker notes — plus slide transitions and entrance animations
+   written into the PowerPoint file itself. Google Slides imports it cleanly
+   (fonts are Slides built-ins).
+
+## What you can put on a slide
+
+- **Text:** headings, paragraphs, bullet/numbered lists — font (sans/serif/mono),
+  size, color, bold/italic/underline, alignment, line height, letter spacing,
+  uppercase; inline editing by double-click.
+- **Layout:** rows and columns (weights, grow, justify/align, padding, gap),
+  margins on *any* element, spacers, or **freeform**: drag anything anywhere
+  with absolute positioning.
+- **Shapes:** rect, roundRect, ellipse, triangle, diamond, chevron, arrow,
+  pill, line — with labels, token fills, gradients, borders, shadows.
+- **Data:** metric cards (brand-locked accent values), brand-styled tables,
+  and **charts** (column, bar, line, area, pie, donut) with colorblind-validated
+  palettes — exported as native editable PowerPoint charts
+  ([docs/chart-palettes.md](docs/chart-palettes.md)).
+- **Media:** images (URL or upload, cover/contain, embedded in the export).
+- **Motion:** entrance animations (appear, fade, fly-in, zoom, wipe) with
+  click ordering and per-bullet reveals; slide transitions (fade, push, wipe).
+  Play them with ▶ Present; they also run in PowerPoint's slideshow.
+- **Notes:** presenter notes, exported to the notes pane.
+
+## Design systems & templates
+
+- **Register a brand once:** `register_theme {name: "acme", base:
+  "corporate-bold", colors: {accent: "#d81b60", ...}, fonts: {...}}` — anything
+  you don't specify inherits from the base. Persisted in `library/themes/`,
+  usable by name from then on. Two themes ship built-in: `corporate-bold` and
+  `minimalist-dark`.
+- **Build a template library at any scale:** register slide JSON
+  (`register_template`), save any slide you've designed
+  (`save_slide_as_template`, or the button in the canvas), or **import
+  existing PowerPoint / Google Slides decks** (`import_pptx_templates`, or
+  ⬆ Import .pptx in the canvas — for Google Slides use File → Download →
+  .pptx). One template per slide, elements at their exact positions; imported
+  colors re-brand to your tokens automatically.
+- **Use them:** `create_slide {template: "kpi-trio"}` from the AI, or the
+  "+ from template…" picker in the canvas. Templates stamp out with fresh ids,
+  as many times as you like.
+
+## MCP tools (24)
+
+| Area | Tools |
 |---|---|
-| `packages/schema` | Zod deck tree (rows/columns + semantic components), token vocabulary, tree utils |
-| `packages/themes` | `corporate-bold`, `minimalist-dark` — themes are token sets as data |
-| `packages/validate` | Auto-correction: raw hex → nearest brand token, spacing/font sizes → brand scales |
-| `packages/layout` | Deterministic solver: tree → absolute boxes; text metrics; autoshrink |
-| `packages/compile-pptx` | Boxes → native OpenXML shapes/text via pptxgenjs |
-| `packages/server` | DeckStore (one write path, patch log), 15 MCP tools, HTTP/WS |
-| `packages/canvas` | React editor: renderer, slide rail, inspector, inline text edit |
+| Read | `get_design_system` · `get_deck` · `get_slide` · `get_changes_since` |
+| Slides | `create_slide` · `delete_slide` · `move_slide` · `set_slide_props` · `set_transition` · `set_notes` |
+| Elements | `add_element` · `edit_element` · `set_style` · `set_sizing` · `delete_element` |
+| Freeform | `add_overlay` · `set_frame` |
+| Motion | `set_animation` |
+| Library | `register_theme` · `register_template` · `save_slide_as_template` · `import_pptx_templates` · `list_templates` · `delete_template` |
+| Brand / export | `set_theme` · `set_deck_title` · `export_pptx` |
 
-## MCP tools
+Resources: `design-system://tokens` · `design-system://templates` · `deck://current`
 
-**Read:** `get_design_system`, `get_deck`, `get_slide`, `get_changes_since`
-**Slides:** `create_slide` (templates: title/bullets/metrics/split/blank), `delete_slide`, `move_slide`, `set_slide_props`, `set_transition`, `set_notes`
-**Elements:** `add_element`, `edit_element`, `set_style`, `set_sizing`, `delete_element`
-**Freeform:** `add_overlay` (absolute placement), `set_frame` (move/resize)
-**Motion:** `set_animation` (appear/fade/flyIn/zoom/wipe, click order, per-bullet)
-**Brand:** `set_theme` (base + hex overrides = brand registration), `set_deck_title`
-**Export:** `export_pptx`
+## Repo layout
 
-## Slide customization
-
-Element types: `heading`, `text`, `bulletList` (bullets or numbered), `metricCard`,
-`image` (embedded, cover/contain), `shape` (rect, roundRect, ellipse, triangle,
-diamond, chevron, rightArrow, pill, line — with labels, gradients, borders,
-shadows), `table` (native, brand-styled header + zebra), `chart` (column, bar,
-line, area, pie, donut — exported as native editable PowerPoint charts, series
-colors from a colorblind-validated per-theme palette, see
-[docs/CHART-PALETTES.md](docs/CHART-PALETTES.md)), `row`/`column`, `spacer`.
-
-Spacing anywhere: besides container `padding`/`gap`, slide `padding` and
-`spacer` elements, **every element takes `sizing.margin`**
-(`{top, bottom, left, right}`) — snapped to the brand spacing scale, editable
-from the inspector's margin grid on any selected element.
-
-Styling: token colors, two-stop gradients, borders, shadows, corner radius,
-per-element font (sans/serif/mono), lineHeight, letterSpacing, uppercase,
-underline, bold/italic, alignment — all snapped to brand scales by the
-auto-correction engine.
-
-Freeform: every slide has an overlay layer where elements carry an absolute
-frame; drag to move, corner-handle to resize on the canvas.
-
-Animations: entrance effects with click ordering (`flyIn` a whole row of cards,
-reveal a list one bullet per click) and slide transitions (fade/push/wipe).
-These play in the canvas **Present mode** (▶) and are written into the .pptx
-as real PowerPoint animation timing trees — the same clicks work in a
-PowerPoint slideshow. Speaker notes export to the notes pane.
-
-**Resources:** `design-system://tokens`, `deck://current`
-
-## Brand enforcement (the auto-correction engine)
-
-Styles reference token *roles* (`"accent"`, `"surface"`), never raw values.
-If the AI — or a human on a canvas slider — supplies an off-brand value, the
-server snaps it to the nearest brand standard and reports the correction to
-both sides:
-
-```json
-{ "field": "color", "from": "#7a2ee8", "to": "accent",
-  "reason": "raw color snapped to nearest brand token \"accent\"" }
+```
+packages/schema        deck + token schema (Zod)
+packages/themes        theme registry + built-ins
+packages/validate      brand auto-correction engine
+packages/layout        deterministic layout solver + font metrics
+packages/compile-pptx  OpenXML compiler + animation/gradient injector
+packages/server        state store, MCP tools, HTTP/WS, library, pptx import
+packages/canvas        React visual editor
+e2e/pitch-demo.ts      full journey test (AI builds → human edits → export)
+docs/architecture.md   how and why it's built this way
 ```
 
-Component constraints are hard: a `MetricCard`'s value always renders in the
-accent color, bold, at the brand's metric size — there is no knob to break it.
+## Known limits
 
-## Bi-directional awareness
-
-Canvas edits are JSON Patch ops through the same pipeline the AI uses; the AI
-calls `get_changes_since(rev)` and sees `{ source: "human", patches: [...] }`.
-Nobody ever works from a stale picture.
-
-## Google Slides
-
-The export uses only features Slides imports cleanly (plain shapes, text
-frames, standard bullets) and only fonts built into both PowerPoint and Google
-Slides (Arial, Georgia). Upload the `.pptx` to Drive and open it, or use
-File → Import slides.
+Entrance animations only (no exit/emphasis); three font families (layout
+determinism requires shipped metrics); charts are semantically — not
+pixel — identical to the preview (PowerPoint draws its own axes); no
+multi-user editing yet.

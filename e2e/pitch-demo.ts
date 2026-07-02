@@ -448,6 +448,45 @@ const chartXml = chartFiles.map((f) => readFileSync(join(xdir3, "ppt", "charts",
 check("charts are editable bar+doughnut XML", chartXml.includes("<c:barChart>") && chartXml.includes("<c:doughnutChart>"));
 check("chart series use the validated palette", chartXml.toUpperCase().includes("2A78D6"));
 
+// ---------- 9. design library: themes, templates, pptx import ----------
+console.log("[9] design library: register a brand, save/reuse/import templates");
+const branded = await tool("register_theme", {
+  name: "atlas-brand",
+  base: "corporate-bold",
+  colors: { accent: "#6d28d9", "accent-alt": "#d97706" },
+});
+check("custom design system registered", branded.registered === "atlas-brand");
+await tool("set_theme", { base: "atlas-brand" });
+const ds = await tool("get_design_system");
+check("deck now runs on the registered design system", ds.tokens.colors.accent === "#6d28d9");
+
+await tool("save_slide_as_template", {
+  slideId: s3.slideId,
+  name: "kpi-trio",
+  description: "Heading + three metric cards",
+});
+const fromTpl = await tool("create_slide", { template: "kpi-trio", name: "KPIs (from template)" });
+check("slide stamped from saved template", !!fromTpl.slideId);
+const again = await tool("create_slide", { template: "kpi-trio" });
+check("template instantiates repeatedly with fresh ids", again.slideId !== fromTpl.slideId);
+
+// import the deck we just exported — the PowerPoint/Google Slides path
+const importRes = await fetch(`${BASE}/api/import?name=external`, {
+  method: "POST",
+  body: new Blob([readFileSync(join(outDir, "Atlas Robotics — Series B.pptx"))]),
+});
+const importData = await importRes.json();
+check("pptx import registered one template per slide", importRes.ok && importData.imported.length >= 7, `imported ${importData.imported?.length}`);
+const fromImport = await tool("create_slide", { template: "external 3" });
+check("imported template instantiates via create_slide", !!fromImport.slideId);
+const tplList = await tool("list_templates");
+check("library lists saved + imported templates", tplList.library.length >= 8, `${tplList.library.length} templates`);
+// cleanup the stamped demo slides so the deck artifact stays 7 slides
+await tool("delete_slide", { slideId: fromTpl.slideId });
+await tool("delete_slide", { slideId: again.slideId });
+await tool("delete_slide", { slideId: fromImport.slideId });
+await tool("set_theme", { base: "corporate-bold", overrides: { colors: { accent: "#6d28d9", "accent-alt": "#d97706" } } });
+
 await browser.close();
 await ai.close();
 

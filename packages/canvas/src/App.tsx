@@ -16,6 +16,36 @@ export function App() {
   const [slideIndex, setSlideIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [presenting, setPresenting] = useState(false);
+  const [templates, setTemplates] = useState<Array<{ name: string; description?: string }>>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const fetchTemplates = () =>
+    fetch("/api/templates")
+      .then((r) => r.json())
+      .then((d) => setTemplates(d.templates ?? []))
+      .catch(() => {});
+  useEffect(() => {
+    fetchTemplates();
+  }, []);
+
+  const importPptx = async (file: File) => {
+    const res = await fetch(`/api/import?name=${encodeURIComponent(file.name.replace(/\.pptx$/i, ""))}`, {
+      method: "POST",
+      body: file,
+    });
+    const data = await res.json();
+    if (!res.ok) alert(`Import failed: ${data.error}`);
+    else alert(`Imported ${data.imported.length} template(s):\n${data.imported.join("\n")}`);
+    fetchTemplates();
+  };
+
+  const addFromTemplate = async (name: string) => {
+    await fetch("/api/slides", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template: name }),
+    });
+  };
   const mainRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.6);
 
@@ -124,6 +154,20 @@ export function App() {
         <span className={`conn ${connected ? "on" : "off"}`}>
           {connected ? `live · rev ${rev}` : "reconnecting…"}
         </span>
+        <button className="present-btn" onClick={() => fileRef.current?.click()} title="Import a PowerPoint or Google Slides .pptx as templates">
+          ⬆ Import .pptx
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".pptx"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) importPptx(f);
+            e.target.value = "";
+          }}
+        />
         <button className="present-btn" onClick={() => setPresenting(true)}>
           ▶ Present
         </button>
@@ -159,6 +203,26 @@ export function App() {
           <button className="add-slide" onClick={addSlide}>
             + Slide
           </button>
+          {templates.length > 0 && (
+            <select
+              className="tpl-select"
+              value=""
+              onFocus={fetchTemplates}
+              onChange={(e) => {
+                if (e.target.value) {
+                  addFromTemplate(e.target.value);
+                  setSlideIndex(deck.slides.length);
+                }
+              }}
+            >
+              <option value="">+ from template…</option>
+              {templates.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          )}
         </nav>
 
         <main ref={mainRef}>
