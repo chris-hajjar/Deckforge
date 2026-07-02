@@ -44,6 +44,33 @@ describe("design-system registration", () => {
     expect(THEMES.acme.colors.accent).toBe("#d81b60");
   });
 
+  it("deletes custom themes but protects built-ins and the active theme", () => {
+    const lib = new Library(tempDir());
+    lib.saveTheme({ name: "temp-brand", base: "corporate-bold" });
+    expect(() => lib.deleteTheme("corporate-bold", "minimalist-dark")).toThrow(/built-ins/);
+    expect(() => lib.deleteTheme("temp-brand", "temp-brand")).toThrow(/active/);
+    lib.deleteTheme("temp-brand", "corporate-bold");
+    expect(THEMES["temp-brand"]).toBeUndefined();
+  });
+
+  it("store.refresh re-brands an open deck after its theme is edited", async () => {
+    const dir = tempDir();
+    const lib = new Library(dir);
+    lib.saveTheme({ name: "editable", base: "corporate-bold", colors: { accent: "#111199" } });
+    const { DeckStore } = await import("../src/store.js");
+    const store = new DeckStore(join(dir, "deck.v2.json"));
+    store.mutate((d) => {
+      d.theme = { base: "editable" };
+    }, "ai");
+    expect(store.tokens.colors.accent).toBe("#111199");
+    // designer edits the theme → refresh picks up new tokens and bumps rev
+    lib.saveTheme({ name: "editable", base: "corporate-bold", colors: { accent: "#991111" } });
+    const before = store.rev;
+    const result = store.refresh();
+    expect(result.tokens.colors.accent).toBe("#991111");
+    expect(store.rev).toBe(before + 1);
+  });
+
   it("rejects invalid theme documents", () => {
     const lib = new Library(tempDir());
     expect(() => lib.saveTheme({ name: "bad", colors: { accent: "#fff" } })).toThrow();

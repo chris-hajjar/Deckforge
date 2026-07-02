@@ -119,6 +119,23 @@ export class DeckStore {
     return result;
   }
 
+  /**
+   * Re-normalize the current deck against the (possibly just-edited) theme
+   * registry and broadcast — called after a design system is modified so an
+   * open deck re-brands live.
+   */
+  refresh(): ApplyResult {
+    const { deck, tokens, corrections } = normalizeDeck(structuredClone(this.deck));
+    this.deck = deck;
+    this.tokens = tokens;
+    this.rev += 1;
+    this.log.push({ rev: this.rev, source: "system", patches: [], corrections, at: new Date().toISOString() });
+    this.persist();
+    const result: ApplyResult = { rev: this.rev, deck, tokens, corrections };
+    for (const fn of this.listeners) fn(result, "system");
+    return result;
+  }
+
   changesSince(rev: number): ChangeEntry[] {
     return this.log.filter((e) => e.rev > rev);
   }

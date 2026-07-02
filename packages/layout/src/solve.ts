@@ -57,6 +57,9 @@ interface Ctx {
 }
 
 function color(ctx: Ctx, role: string | undefined, fallback: keyof ThemeTokens["colors"]): string {
+  // raw hex passes through so pre-validation content (template previews)
+  // renders faithfully; validated decks never carry raw hex here
+  if (role?.startsWith("#")) return role;
   const roles = ctx.tokens.colors as Record<string, string>;
   return (role && roles[role]) || roles[fallback];
 }

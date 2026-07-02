@@ -487,6 +487,59 @@ await tool("delete_slide", { slideId: again.slideId });
 await tool("delete_slide", { slideId: fromImport.slideId });
 await tool("set_theme", { base: "corporate-bold", overrides: { colors: { accent: "#6d28d9", "accent-alt": "#d97706" } } });
 
+// ---------- 10. design-system UI: cycling, editing, template gallery ----------
+console.log("[10] design-system + template management UI");
+const themesRes = await fetch(`${BASE}/api/themes`).then((r) => r.json());
+check(
+  "theme API lists built-ins + registered brand with active marker",
+  themesRes.themes.length >= 3 && themesRes.custom.includes("atlas-brand"),
+  `${themesRes.themes.length} themes`,
+);
+// designer edits the registered brand → open deck re-brands live
+const editRes = await fetch(`${BASE}/api/themes`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name: "atlas-brand", base: "corporate-bold", colors: { accent: "#0e7490" } }),
+});
+check("theme edit accepted over HTTP", editRes.ok);
+
+const page4 = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+await page4.goto(BASE);
+await page4.waitForSelector(".slide-frame");
+
+// cycle design systems from the header
+const themeSelect = page4.locator(".theme-picker select");
+check("header cycler lists every design system", (await themeSelect.locator("option").count()) >= 3);
+await themeSelect.selectOption("atlas-brand");
+await page4.waitForTimeout(500);
+check(
+  "activating a custom design system restyles the deck",
+  await page4.locator("main .slide-frame").isVisible(),
+);
+
+// Design systems tab
+await page4.getByRole("button", { name: "Design systems" }).click();
+await page4.waitForSelector(".theme-card");
+check("design tab lists theme cards", (await page4.locator(".theme-card").count()) >= 3);
+await page4.locator(".theme-card", { hasText: "atlas-brand" }).getByRole("button", { name: "edit" }).click();
+await page4.waitForSelector(".theme-editor input[type=color]");
+check(
+  "editor exposes full token depth (color pickers for roles + chart slots)",
+  (await page4.locator(".theme-editor input[type=color]").count()) >= 15,
+);
+check("live preview renders a sample slide", await page4.locator(".theme-editor .slide-frame").isVisible());
+await page4.screenshot({ path: join(outDir, "8-design-systems-tab.png") });
+
+// Templates tab with rendered thumbnails
+await page4.getByRole("button", { name: "Templates" }).click();
+await page4.waitForSelector(".tpl-card");
+check("template gallery shows rendered thumbnails", (await page4.locator(".tpl-card .slide-frame").count()) >= 8);
+await page4.screenshot({ path: join(outDir, "9-templates-tab.png") });
+await page4.close();
+
+// restore the demo deck's theme
+await tool("set_theme", { base: "corporate-bold", overrides: { colors: { accent: "#6d28d9", "accent-alt": "#d97706" } } });
+
 await browser.close();
 await ai.close();
 

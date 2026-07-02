@@ -126,6 +126,24 @@ export class Library {
     rmSync(join(this.templatesDir, `${safeFile(name)}.json`), { force: true });
   }
 
+  /** Remove a custom theme (built-ins and the active theme are protected). */
+  deleteTheme(name: string, activeBase: string): void {
+    if (!this.customThemes.has(name)) {
+      throw new Error(`"${name}" is not a custom theme (built-ins can't be deleted)`);
+    }
+    if (name === activeBase) {
+      throw new Error(`"${name}" is the deck's active theme — switch themes first`);
+    }
+    this.customThemes.delete(name);
+    delete THEMES[name];
+    rmSync(join(this.themesDir, `${safeFile(name)}.json`), { force: true });
+  }
+
+  /** Full template documents (for visual galleries). */
+  listFull(): SlideTemplate[] {
+    return [...this.templates.values()];
+  }
+
   list(): Array<{ name: string; description?: string; tags?: string[] }> {
     return [...this.templates.values()].map(({ name, description, tags }) => ({
       name,

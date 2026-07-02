@@ -11,6 +11,7 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import type { Operation } from "fast-json-patch";
 import { compileDeckToBuffer } from "@deckforge/compile-pptx";
+import { BUILTIN_THEMES, THEMES } from "@deckforge/themes";
 import type { DeckStore } from "./store.js";
 import type { Library } from "./library.js";
 
@@ -36,8 +37,50 @@ export function createHttpServer(store: DeckStore, canvasDist: string, library: 
     }
   });
 
-  app.get("/api/templates", (_req, res) => {
-    res.json({ templates: library.list() });
+  // ---------- design systems ----------
+  app.get("/api/themes", (_req, res) => {
+    res.json({
+      themes: Object.values(THEMES),
+      builtin: [...BUILTIN_THEMES],
+      custom: [...library.customThemes],
+      active: store.deck.theme.base,
+    });
+  });
+
+  // create or update a design system (full tokens, or {base, ...patch})
+  app.post("/api/themes", (req, res) => {
+    try {
+      const tokens = library.saveTheme(req.body ?? {});
+      // an open deck using this theme re-brands live
+      if (store.deck.theme.base === tokens.name) store.refresh();
+      res.json({ registered: tokens.name, tokens });
+    } catch (e) {
+      res.status(422).json({ error: (e as Error).message });
+    }
+  });
+
+  app.delete("/api/themes/:name", (req, res) => {
+    try {
+      library.deleteTheme(req.params.name, store.deck.theme.base);
+      res.json({ deleted: req.params.name });
+    } catch (e) {
+      res.status(422).json({ error: (e as Error).message });
+    }
+  });
+
+  app.get("/api/templates", (req, res) => {
+    res.json({
+      templates: req.query.full !== undefined ? library.listFull() : library.list(),
+    });
+  });
+
+  app.delete("/api/templates/:name", (req, res) => {
+    try {
+      library.deleteTemplate(req.params.name);
+      res.json({ deleted: req.params.name, templates: library.list() });
+    } catch (e) {
+      res.status(422).json({ error: (e as Error).message });
+    }
   });
 
   // save an existing slide of the deck as a library template

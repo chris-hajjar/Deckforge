@@ -9,15 +9,30 @@ import { solveSlide } from "@deckforge/layout";
 import { SlideCanvas } from "./SlideCanvas.js";
 import { Inspector } from "./Inspector.js";
 import { Present } from "./Present.js";
+import { DesignTab } from "./DesignTab.js";
+import { TemplatesTab } from "./TemplatesTab.js";
 import { useDeck } from "./useDeck.js";
+
+type Tab = "deck" | "design" | "templates";
 
 export function App() {
   const { state, sendPatches } = useDeck();
   const [slideIndex, setSlideIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [presenting, setPresenting] = useState(false);
+  const [tab, setTab] = useState<Tab>("deck");
+  const [themeNames, setThemeNames] = useState<string[]>([]);
   const [templates, setTemplates] = useState<Array<{ name: string; description?: string }>>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const fetchThemes = () =>
+    fetch("/api/themes")
+      .then((r) => r.json())
+      .then((d) => setThemeNames((d.themes ?? []).map((t: { name: string }) => t.name)))
+      .catch(() => {});
+  useEffect(() => {
+    fetchThemes();
+  }, [tab]);
 
   const fetchTemplates = () =>
     fetch("/api/templates")
@@ -81,6 +96,15 @@ export function App() {
     if (visit) sendPatches([{ op: "replace", path: `${visit.pointer}/frame`, value: frame }]);
   };
 
+  const activateTheme = (name: string) =>
+    sendPatches([{ op: "replace", path: "/theme", value: { base: name } }]);
+
+  const cycleTheme = () => {
+    if (themeNames.length < 2) return;
+    const i = themeNames.indexOf(deck.theme.base);
+    activateTheme(themeNames[(i + 1) % themeNames.length]);
+  };
+
   if (presenting) {
     return (
       <Present deck={deck} tokens={tokens} startIndex={safeIndex} onExit={() => setPresenting(false)} />
@@ -127,6 +151,13 @@ export function App() {
     <div className="shell">
       <header>
         <span className="logo">⚒ Deckforge</span>
+        <nav className="tabs">
+          {(["deck", "design", "templates"] as const).map((t) => (
+            <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+              {t === "deck" ? "Deck" : t === "design" ? "Design systems" : "Templates"}
+            </button>
+          ))}
+        </nav>
         <input
           className="deck-title"
           key={deck.title}
@@ -137,19 +168,16 @@ export function App() {
           }
         />
         <div className="theme-picker">
-          {["corporate-bold", "minimalist-dark"].map((t) => (
-            <button
-              key={t}
-              className={deck.theme.base === t ? "active" : ""}
-              onClick={() =>
-                sendPatches([
-                  { op: "replace", path: "/theme", value: { ...deck.theme, base: t } },
-                ])
-              }
-            >
-              {t}
-            </button>
-          ))}
+          <select value={deck.theme.base} onChange={(e) => activateTheme(e.target.value)}>
+            {(themeNames.length ? themeNames : [deck.theme.base]).map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <button title="Cycle design systems" onClick={cycleTheme}>
+            ⟳
+          </button>
         </div>
         <span className={`conn ${connected ? "on" : "off"}`}>
           {connected ? `live · rev ${rev}` : "reconnecting…"}
@@ -176,6 +204,18 @@ export function App() {
         </a>
       </header>
 
+      {tab === "design" && <DesignTab onActivate={activateTheme} />}
+      {tab === "templates" && (
+        <TemplatesTab
+          deck={deck}
+          tokens={tokens}
+          onAdded={() => {
+            setTab("deck");
+            setSlideIndex(deck.slides.length);
+          }}
+        />
+      )}
+      {tab === "deck" && (
       <div className="body">
         <nav className="rail">
           {deck.slides.map((s, i) => (
@@ -263,6 +303,7 @@ export function App() {
           onDeselect={() => setSelectedId(null)}
         />
       </div>
+      )}
     </div>
   );
 }
