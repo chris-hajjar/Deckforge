@@ -28,6 +28,9 @@ interface Props {
   onSelect?: (nodeId: string | null) => void;
   onEditText?: (nodeId: string, text: string) => void;
   onFrameChange?: (nodeId: string, frame: Frame) => void;
+  /** DevTools-style hover reporting (drives code highlighting). */
+  onHover?: (nodeId: string | null) => void;
+  hoveredId?: string | null;
   interactive?: boolean;
 }
 
@@ -40,6 +43,8 @@ export function SlideCanvas({
   onSelect,
   onEditText,
   onFrameChange,
+  onHover,
+  hoveredId,
   interactive = true,
 }: Props) {
   const resolved = useMemo(() => solveSlide(slide, tokens), [slide, tokens]);
@@ -127,6 +132,7 @@ export function SlideCanvas({
       onClick={(e) => {
         if (interactive && e.target === e.currentTarget) onSelect?.(null);
       }}
+      onPointerLeave={() => onHover?.(null)}
     >
       {resolved.boxes.map((box) => {
         const isSelected = interactive && selectedId != null && box.nodeId === selectedId;
@@ -155,8 +161,8 @@ export function SlideCanvas({
                 lineHeight: t.lineHeight,
                 color: t.color,
                 textAlign: t.align,
-                background: "rgba(124,108,255,0.08)",
-                border: "1px solid #7c6cff",
+                background: "rgba(176,101,66,0.08)",
+                border: "1px solid #b06542",
                 outline: "none",
                 resize: "none",
                 padding: 0,
@@ -188,7 +194,11 @@ export function SlideCanvas({
                   top: box.y * scale,
                   width: box.w * scale,
                   height: box.h * scale,
-                  outline: isSelected ? "2px solid #7c6cff" : undefined,
+                  outline: isSelected
+                    ? "2px solid #b06542"
+                    : hoveredId != null && box.nodeId === hoveredId
+                      ? "1.5px dashed rgba(176,101,66,0.65)"
+                      : undefined,
                   outlineOffset: 1,
                   cursor: overlayRoot ? "move" : "default",
                 }}
@@ -196,6 +206,7 @@ export function SlideCanvas({
                   e.stopPropagation();
                   onSelect?.(box.nodeId);
                 }}
+                onPointerEnter={() => onHover?.(box.nodeId)}
                 onDoubleClick={(e) => {
                   if (editableText && box.kind === "text") {
                     e.stopPropagation();
@@ -216,7 +227,7 @@ export function SlideCanvas({
                   top: (box.y + box.h) * scale - 6,
                   width: 12,
                   height: 12,
-                  background: "#7c6cff",
+                  background: "#b06542",
                   borderRadius: 3,
                   cursor: "nwse-resize",
                   zIndex: 10,

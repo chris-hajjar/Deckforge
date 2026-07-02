@@ -8,6 +8,7 @@ import { findNode, type Frame } from "@deckforge/schema";
 import { solveSlide } from "@deckforge/layout";
 import { SlideCanvas } from "./SlideCanvas.js";
 import { Inspector } from "./Inspector.js";
+import { CodePanel } from "./CodePanel.js";
 import { Present } from "./Present.js";
 import { DesignTab } from "./DesignTab.js";
 import { TemplatesTab } from "./TemplatesTab.js";
@@ -21,6 +22,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [presenting, setPresenting] = useState(false);
   const [tab, setTab] = useState<Tab>("deck");
+  const [sideTab, setSideTab] = useState<"inspect" | "code">("inspect");
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [themeNames, setThemeNames] = useState<string[]>([]);
   const [templates, setTemplates] = useState<Array<{ name: string; description?: string }>>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -275,6 +278,8 @@ export function App() {
             onSelect={setSelectedId}
             onEditText={editText}
             onFrameChange={changeFrame}
+            onHover={setHoveredId}
+            hoveredId={sideTab === "code" ? hoveredId : null}
           />
           <div className="statusbar">
             {warnings.map((w, i) => (
@@ -294,14 +299,34 @@ export function App() {
           </div>
         </main>
 
-        <Inspector
-          deck={deck}
-          tokens={tokens}
-          slideIndex={safeIndex}
-          selectedId={selectedId}
-          sendPatches={sendPatches}
-          onDeselect={() => setSelectedId(null)}
-        />
+        <div className={`sidebar ${sideTab === "code" ? "wide" : ""}`}>
+          <div className="side-tabs">
+            <button className={sideTab === "inspect" ? "active" : ""} onClick={() => setSideTab("inspect")}>
+              Inspect
+            </button>
+            <button className={sideTab === "code" ? "active" : ""} onClick={() => setSideTab("code")}>
+              Code
+            </button>
+          </div>
+          {sideTab === "inspect" ? (
+            <Inspector
+              deck={deck}
+              tokens={tokens}
+              slideIndex={safeIndex}
+              selectedId={selectedId}
+              sendPatches={sendPatches}
+              onDeselect={() => setSelectedId(null)}
+            />
+          ) : (
+            <CodePanel
+              slide={slide}
+              slideIndex={safeIndex}
+              hoveredId={hoveredId}
+              selectedId={selectedId}
+              sendPatches={sendPatches}
+            />
+          )}
+        </div>
       </div>
       )}
     </div>

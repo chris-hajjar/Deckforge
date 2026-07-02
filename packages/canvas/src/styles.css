@@ -276,3 +276,53 @@ hr { border: none; border-top: 1px solid var(--line-soft); margin: 12px 0 4px; w
 .tpl-thumb { display: grid; place-items: center; background: var(--panel-2); padding: 12px; }
 .tpl-thumb .slide-frame { box-shadow: none; border: 1px solid var(--line); }
 .tpl-meta { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+
+/* ---------- sidebar (inspect | code) ---------- */
+.sidebar {
+  width: 264px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel); border-left: 1px solid var(--line);
+  transition: width 0.2s ease;
+}
+.sidebar.wide { width: 420px; }
+.sidebar .inspector { width: 100%; border-left: none; flex: 1; }
+.side-tabs {
+  display: flex; gap: 4px; padding: 10px 12px 0;
+  border-bottom: 1px solid var(--line-soft); background: var(--panel);
+}
+.side-tabs button {
+  border: none; background: none; color: var(--muted); border-radius: 8px 8px 0 0;
+  padding: 6px 14px; font-weight: 500;
+}
+.side-tabs button:hover { color: var(--text); }
+.side-tabs button.active {
+  color: var(--text); font-weight: 650;
+  box-shadow: inset 0 -2px 0 var(--brand);
+}
+
+/* code panel: transparent textarea stacked on a highlighted <pre> */
+.code-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.code-toolbar {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+}
+.code-toolbar .mini { flex: 1; }
+.code-error { margin: 0 12px 6px; font-size: 11.5px; }
+.code-editor { position: relative; flex: 1; min-height: 0; }
+.code-editor pre, .code-editor textarea {
+  position: absolute; inset: 0; margin: 0; padding: 10px 12px;
+  font: 12px/1.3 "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  white-space: pre; overflow: auto; tab-size: 2; box-sizing: border-box;
+  border: none; word-break: normal; overflow-wrap: normal;
+}
+.code-editor pre {
+  background: #fbfaf5; color: #4d4639; pointer-events: none; z-index: 0;
+  border-top: 1px solid var(--line-soft);
+}
+.code-editor pre mark {
+  background: rgba(176, 101, 66, 0.16); color: inherit;
+  outline: 1px solid rgba(176, 101, 66, 0.35); border-radius: 2px;
+}
+.code-editor textarea {
+  background: transparent; color: transparent; caret-color: #33302a;
+  resize: none; outline: none; z-index: 1;
+}
+.code-editor textarea::selection { background: rgba(176, 101, 66, 0.25); }
