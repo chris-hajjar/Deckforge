@@ -99,7 +99,12 @@ describe("template library", () => {
     const dir = tempDir();
     const lib = new Library(dir);
     lib.saveTemplate("quote", tplSlide, "A pull-quote slide", ["content"]);
-    expect(lib.list()).toEqual([{ name: "quote", description: "A pull-quote slide", tags: ["content"] }]);
+    expect(lib.list()[0]).toMatchObject({
+      name: "quote",
+      description: "A pull-quote slide",
+      tags: ["content"],
+      facets: { hasOverlays: true, textBlocks: 2 },
+    });
     const lib2 = new Library(dir);
     expect(lib2.templates.get("quote")?.slide.root).toBeTruthy();
   });

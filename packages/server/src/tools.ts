@@ -174,6 +174,10 @@ export function registerTools(
         rev: store.rev,
         activeTheme: store.deck.theme,
         tokens: store.tokens,
+        brand: store.tokens.brand ?? null,
+        brandNote: store.tokens.brand
+          ? "Write ALL slide copy in this brand's voice: honor tone, dos/donts and vocabulary. Use logos via image elements/overlays (src from brand.logos)."
+          : "No brand section registered — consider register_theme with a brand block (voice, logos, imagery).",
         availableThemes: Object.keys(THEMES),
         customThemes: [...library.customThemes],
         templates: library.list(),
@@ -273,10 +277,11 @@ export function registerTools(
     "register_theme",
     {
       description:
-        "Register a design system as a named theme, persisted in the project library and usable by set_theme. Easiest form: {name, base: 'corporate-bold', colors: {...hex by role}, fonts: {...}} — everything not given inherits from the base (including the validated chart palette). Full ThemeTokens documents are also accepted (omit base).",
+        "Register a design system as a named theme, persisted in the project library and usable by set_theme. Easiest form: {name, base: 'corporate-bold', colors: {...hex by role}, fonts: {...}} — everything not given inherits from the base (including the validated chart palette). Full ThemeTokens documents are also accepted (omit base). Include a `brand` section for a MEANINGFUL system: {tagline, description, audience, voice: {tone, personality[], dos[], donts[], preferredTerms[], avoidTerms[], exampleCopy}, logos: [{name, src, usage}], imagery: {style, guidance}} — all copy you write should follow it.",
       inputSchema: {
         name: z.string(),
         base: z.string().optional(),
+        brand: z.record(z.string(), z.unknown()).optional(),
         colors: z.record(z.string(), z.string()).optional(),
         fonts: z.record(z.string(), z.string()).optional(),
         fontSizes: z.record(z.string(), z.number()).optional(),
@@ -354,7 +359,8 @@ export function registerTools(
   server.registerTool(
     "list_templates",
     {
-      description: "List registered library templates (name, description, tags) plus the built-in structural ones.",
+      description:
+        "List registered library templates with auto-derived structure facets, plus the built-in structural ones. Templates are REFERENCES: start from the closest one, then adapt content/structure freely with the element tools — or build from scratch when nothing fits. For big libraries prefer find_templates.",
       inputSchema: {},
     },
     async () =>
@@ -362,6 +368,73 @@ export function registerTools(
         builtin: ["blank", "title", "bullets", "metrics", "split"],
         library: library.list(),
       }),
+  );
+
+  server.registerTool(
+    "find_templates",
+    {
+      description:
+        "Search the template library by intent (e.g. 'kpi dashboard', 'cover slide', 'roadmap timeline', 'comparison table'). Ranks by name/tags/description AND by derived structure (a query for 'kpis' finds slides containing metric cards even if never labeled). Returns scores + why each matched. Use the best hit as a baseline via create_slide, mix pieces across templates via copy_from_template, or ignore them all if the script calls for something custom.",
+      inputSchema: {
+        query: z.string(),
+        limit: z.number().int().min(1).max(20).default(8),
+      },
+    },
+    async ({ query, limit }) => {
+      const results = library.find(query, limit);
+      return ok({
+        query,
+        results,
+        hint:
+          results.length === 0
+            ? "No matches — list_templates shows everything, or build the slide from scratch."
+            : "Templates are baselines: instantiate then adapt, or copy_from_template to mix elements across them.",
+      });
+    },
+  );
+
+  server.registerTool(
+    "copy_from_template",
+    {
+      description:
+        "Mix-and-match: copy ONE element (and its children) from a template into an existing slide — e.g. pull the metric-card row from template A into a slide based on template B. Select by elementId or first-of elementType ('row','metricCard','chart','table','shape',...). Freeform source elements keep their frame and land in the overlay layer unless parentId targets a container.",
+      inputSchema: {
+        templateName: z.string(),
+        slideId: z.string(),
+        elementId: z.string().optional(),
+        elementType: z.string().optional(),
+        parentId: z.string().optional(),
+        index: z.number().int().min(0).optional(),
+      },
+    },
+    async ({ templateName, slideId, elementId, elementType, parentId, index }) => {
+      try {
+        if (!elementId && !elementType) throw new Error("Provide elementId or elementType");
+        let newId = "";
+        const result = store.mutate((draft) => {
+          const slide = requireSlide(draft, slideId) as Slide & { overlays?: DeckNode[] };
+          const source = library.findTemplateElement(templateName, { elementId, elementType });
+          const withIds = assignIds(draft, source as unknown as Record<string, unknown>) as unknown as DeckNode;
+          newId = withIds.id;
+          if (withIds.frame && !parentId) {
+            slide.overlays = [...(slide.overlays ?? []), withIds];
+            return;
+          }
+          delete (withIds as { frame?: unknown }).frame;
+          const parent = parentId
+            ? [...walkSlide(slide, 0)].find((v) => v.node.id === parentId)?.node
+            : slide.root;
+          if (!parent) throw new Error(`No element "${parentId}" on slide "${slideId}"`);
+          if (parent.type !== "row" && parent.type !== "column") {
+            throw new Error(`Parent "${parent.id}" is a ${parent.type}, not a container`);
+          }
+          parent.children.splice(index ?? parent.children.length, 0, withIds);
+        }, "ai");
+        return summarize(result, { elementId: newId });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
   );
 
   server.registerTool(

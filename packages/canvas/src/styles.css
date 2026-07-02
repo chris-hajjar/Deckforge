@@ -202,6 +202,7 @@ button.primary { background: var(--brand); border-color: var(--brand); color: wh
   font-size: 11px; color: var(--muted); text-transform: uppercase;
   letter-spacing: 0.4px; margin-top: 8px; display: flex; justify-content: space-between;
 }
+.theme-editor textarea,
 .theme-editor input:not([type="color"]):not([type="number"]) {
   background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
   border-radius: 6px; padding: 6px 8px; font-size: 13px; width: 100%;
@@ -241,3 +242,13 @@ button.primary { background: var(--brand); border-color: var(--brand); color: wh
 .tpl-thumb { display: grid; place-items: center; background: var(--panel-2); padding: 10px; }
 .tpl-thumb .slide-frame { box-shadow: none; border: 1px solid var(--line); }
 .tpl-meta { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.logo-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.logo-row img {
+  width: 44px; height: 30px; object-fit: contain; background: #fff;
+  border-radius: 4px; border: 1px solid var(--line);
+}
+.logo-row input { flex: 1; }
+.logo-row select {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 6px; padding: 4px 6px; font-size: 12px;
+}

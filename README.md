@@ -92,9 +92,22 @@ edit the same live deck. Everything persists in your project dir:
   ⬆ Import .pptx in the canvas — for Google Slides use File → Download →
   .pptx). One template per slide, elements at their exact positions; imported
   colors re-brand to your tokens automatically.
-- **Use them:** `create_slide {template: "kpi-trio"}` from the AI, or the
-  "+ from template…" picker in the canvas. Templates stamp out with fresh ids,
-  as many times as you like.
+- **Use them at scale:** every template gets auto-derived structure facets, so
+  the AI can `find_templates {query: "kpi slide for the board"}` by intent and
+  `copy_from_template` to mix elements across templates (the metric row from
+  one, the layout of another). Templates are baselines, not scripts — the AI
+  adapts them or builds from scratch when the brief calls for it. In the
+  canvas: the Templates tab (visual gallery) and the "+ from template…" picker.
+- **Manage visually:** the **Design systems** tab lists every theme with
+  activate/duplicate/edit/delete and a full-depth editor — every color role,
+  font, size, scale, radius and chart-palette slot, with a live preview slide —
+  plus a ⟳ cycler in the header. Editing an in-use theme re-brands the open
+  deck live.
+- **Brand, not just colors:** each design system carries an optional `brand`
+  block — tagline, description, audience, voice & tone (personality, do's and
+  don'ts, preferred/avoided terms, example copy), logo assets, imagery
+  guidance. The AI reads it from `get_design_system` and writes slide copy in
+  your voice; logos drop onto slides as images/overlays.
 
 ## MCP tools (24)
 

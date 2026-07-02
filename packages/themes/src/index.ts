@@ -26,6 +26,7 @@ export function registerTheme(tokens: unknown): ThemeTokens {
 /** Deep-partial of ThemeTokens for building a design system on a base. */
 export interface ThemePatch {
   name: string;
+  brand?: ThemeTokens["brand"];
   colors?: Partial<ThemeTokens["colors"]>;
   fonts?: Partial<ThemeTokens["fonts"]>;
   fontSizes?: Partial<ThemeTokens["fontSizes"]>;
@@ -44,6 +45,9 @@ export function mergeTheme(base: ThemeTokens, patch: ThemePatch): ThemeTokens {
   return ThemeTokensSchema.parse({
     ...base,
     name: patch.name,
+    ...(patch.brand !== undefined || base.brand !== undefined
+      ? { brand: patch.brand ?? base.brand }
+      : {}),
     colors: { ...base.colors, ...(patch.colors ?? {}) },
     fonts: { ...base.fonts, ...(patch.fonts ?? {}) },
     fontSizes: { ...base.fontSizes, ...(patch.fontSizes ?? {}) },

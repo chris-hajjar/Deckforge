@@ -22,12 +22,77 @@ import {
 } from "@deckforge/schema";
 import { THEMES, mergeTheme, registerTheme, type ThemePatch } from "@deckforge/themes";
 
+/** Auto-derived structure summary; makes big libraries searchable. */
+export interface TemplateFacets {
+  /** element type → count, across root + overlays */
+  counts: Record<string, number>;
+  /** dominant layout family */
+  layout: "title" | "metrics" | "chart" | "table" | "split" | "list" | "freeform" | "content";
+  hasOverlays: boolean;
+  textBlocks: number;
+}
+
 export interface SlideTemplate {
   name: string;
   description?: string;
   tags?: string[];
+  facets?: TemplateFacets;
   slide: Slide;
 }
+
+function deriveFacets(slide: Slide): TemplateFacets {
+  const counts: Record<string, number> = {};
+  const visit = (node: DeckNode) => {
+    counts[node.type] = (counts[node.type] ?? 0) + 1;
+    if (node.type === "row" || node.type === "column") for (const c of node.children) visit(c);
+  };
+  visit(slide.root);
+  for (const o of slide.overlays ?? []) visit(o);
+  const rootChildren = slide.root.type === "column" || slide.root.type === "row" ? slide.root.children.length : 1;
+  const n = (t: string) => counts[t] ?? 0;
+  let layout: TemplateFacets["layout"] = "content";
+  if (n("metricCard") >= 2) layout = "metrics";
+  else if (n("chart") >= 1) layout = "chart";
+  else if (n("table") >= 1) layout = "table";
+  else if (rootChildren === 0 && (slide.overlays?.length ?? 0) > 0) layout = "freeform";
+  else if (n("row") >= 1 && n("column") >= 2) layout = "split";
+  else if (n("bulletList") >= 1) layout = "list";
+  else if (n("heading") >= 1 && n("text") + n("bulletList") <= 1 && rootChildren <= 2) layout = "title";
+  return {
+    counts,
+    layout,
+    hasOverlays: (slide.overlays?.length ?? 0) > 0,
+    textBlocks: n("heading") + n("text") + n("bulletList"),
+  };
+}
+
+/** Deck-vocabulary synonyms so searches match how people talk about slides. */
+const SYNONYMS: Record<string, string[]> = {
+  kpi: ["metrics", "metriccard"],
+  kpis: ["metrics", "metriccard"],
+  stats: ["metrics", "metriccard"],
+  numbers: ["metrics", "chart"],
+  metric: ["metrics", "metriccard"],
+  graph: ["chart"],
+  graphs: ["chart"],
+  data: ["chart", "table", "metrics"],
+  comparison: ["table", "split"],
+  cover: ["title"],
+  intro: ["title"],
+  opener: ["title"],
+  closing: ["title"],
+  agenda: ["list"],
+  bullets: ["list", "bulletlist"],
+  points: ["list"],
+  quote: ["content", "text"],
+  timeline: ["shape", "chevron", "roadmap"],
+  roadmap: ["shape", "chevron"],
+  team: ["image", "split"],
+  photo: ["image"],
+  picture: ["image"],
+  diagram: ["shape", "freeform"],
+  hero: ["title", "freeform"],
+};
 
 const safeFile = (name: string) => {
   const s = name.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-").replace(/^-+|-+$/g, "");
@@ -75,11 +140,13 @@ export class Library {
       try {
         const raw = JSON.parse(readFileSync(join(this.templatesDir, f), "utf8"));
         fillIds(raw.slide);
+        const parsed = SlideSchema.parse(raw.slide) as Slide;
         const tpl: SlideTemplate = {
           name: raw.name,
           description: raw.description,
           tags: raw.tags,
-          slide: SlideSchema.parse(raw.slide) as Slide,
+          facets: raw.facets ?? deriveFacets(parsed),
+          slide: parsed,
         };
         this.templates.set(tpl.name, tpl);
       } catch (e) {
@@ -112,13 +179,90 @@ export class Library {
     const raw = structuredClone(slide) as Record<string, unknown>;
     fillIds(raw);
     const parsed = SlideSchema.parse(raw) as Slide;
-    const tpl: SlideTemplate = { name, description, tags, slide: parsed };
+    const tpl: SlideTemplate = { name, description, tags, facets: deriveFacets(parsed), slide: parsed };
     this.templates.set(name, tpl);
     writeFileSync(
       join(this.templatesDir, `${safeFile(name)}.json`),
       JSON.stringify(tpl, null, 2) + "\n",
     );
     return tpl;
+  }
+
+  /**
+   * Ranked keyword search over names, descriptions, tags and derived
+   * structure facets (with deck-vocabulary synonyms). Deterministic scoring
+   * so results are explainable.
+   */
+  find(query: string, limit = 8): Array<{
+    name: string;
+    description?: string;
+    tags?: string[];
+    facets?: TemplateFacets;
+    score: number;
+    matched: string[];
+  }> {
+    const tokens = query
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 1);
+    const expanded = new Set(tokens);
+    for (const t of tokens) for (const s of SYNONYMS[t] ?? []) expanded.add(s);
+
+    const results = [...this.templates.values()].map((tpl) => {
+      let score = 0;
+      const matched: string[] = [];
+      const name = tpl.name.toLowerCase();
+      const desc = (tpl.description ?? "").toLowerCase();
+      const tags = (tpl.tags ?? []).map((t) => t.toLowerCase());
+      const facetWords = tpl.facets
+        ? [tpl.facets.layout, ...Object.keys(tpl.facets.counts).map((k) => k.toLowerCase())]
+        : [];
+      for (const t of expanded) {
+        if (name.includes(t)) {
+          score += 5;
+          matched.push(`name:${t}`);
+        }
+        if (tags.some((g) => g.includes(t))) {
+          score += 4;
+          matched.push(`tag:${t}`);
+        }
+        if (facetWords.includes(t)) {
+          score += 3;
+          matched.push(`structure:${t}`);
+        }
+        if (desc.includes(t)) {
+          score += 2;
+          matched.push(`description:${t}`);
+        }
+      }
+      return { name: tpl.name, description: tpl.description, tags: tpl.tags, facets: tpl.facets, score, matched };
+    });
+    return results
+      .filter((r) => r.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  }
+
+  /** Find an element inside a template (by id, or first of a type). */
+  findTemplateElement(templateName: string, opts: { elementId?: string; elementType?: string }): DeckNode {
+    const tpl = this.templates.get(templateName);
+    if (!tpl) throw new Error(`No template "${templateName}"`);
+    const all: DeckNode[] = [];
+    const visit = (node: DeckNode) => {
+      all.push(node);
+      if (node.type === "row" || node.type === "column") for (const c of node.children) visit(c);
+    };
+    visit(tpl.slide.root);
+    for (const o of tpl.slide.overlays ?? []) visit(o);
+    const found = opts.elementId
+      ? all.find((n) => n.id === opts.elementId)
+      : all.find((n) => n.type === opts.elementType);
+    if (!found) {
+      throw new Error(
+        `No element ${opts.elementId ? `"${opts.elementId}"` : `of type "${opts.elementType}"`} in template "${templateName}". It contains: ${all.map((n) => `${n.type}#${n.id}`).join(", ")}`,
+      );
+    }
+    return structuredClone(found);
   }
 
   deleteTemplate(name: string): void {
@@ -144,11 +288,12 @@ export class Library {
     return [...this.templates.values()];
   }
 
-  list(): Array<{ name: string; description?: string; tags?: string[] }> {
-    return [...this.templates.values()].map(({ name, description, tags }) => ({
+  list(): Array<{ name: string; description?: string; tags?: string[]; facets?: TemplateFacets }> {
+    return [...this.templates.values()].map(({ name, description, tags, facets }) => ({
       name,
       description,
       tags,
+      facets,
     }));
   }
 

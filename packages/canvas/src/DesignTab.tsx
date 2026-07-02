@@ -141,6 +141,61 @@ export function DesignTab({ onActivate }: { onActivate: (name: string) => void }
       return next;
     });
 
+  /** Ensure draft.brand (and optionally a sub-object) exists, then mutate. */
+  const setBrand = (fn: (b: NonNullable<ThemeTokens["brand"]>) => void) =>
+    set((d) => {
+      d.brand = d.brand ?? {};
+      fn(d.brand);
+    });
+
+  const listInput = (
+    label: string,
+    values: string[] | undefined,
+    onChange: (v: string[] | undefined) => void,
+    opts: { rows?: number; placeholder?: string } = {},
+  ) => (
+    <>
+      <label>{label}</label>
+      <textarea
+        key={`${draft?.name}-${label}`}
+        rows={opts.rows ?? 2}
+        placeholder={opts.placeholder}
+        defaultValue={(values ?? []).join("\n")}
+        onBlur={(e) => {
+          const items = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+          onChange(items.length ? items : undefined);
+        }}
+      />
+    </>
+  );
+
+  const textInput = (
+    label: string,
+    value: string | undefined,
+    onChange: (v: string | undefined) => void,
+    opts: { rows?: number; placeholder?: string } = {},
+  ) => (
+    <>
+      <label>{label}</label>
+      {opts.rows ? (
+        <textarea
+          key={`${draft?.name}-${label}`}
+          rows={opts.rows}
+          placeholder={opts.placeholder}
+          defaultValue={value ?? ""}
+          onBlur={(e) => onChange(e.target.value.trim() || undefined)}
+        />
+      ) : (
+        <input
+          key={`${draft?.name}-${label}`}
+          placeholder={opts.placeholder}
+          defaultValue={value ?? ""}
+          onBlur={(e) => onChange(e.target.value.trim() || undefined)}
+        />
+      )}
+    </>
+  );
+
   const numListInput = (
     label: string,
     values: number[],
@@ -215,6 +270,79 @@ export function DesignTab({ onActivate }: { onActivate: (name: string) => void }
             disabled={!isNew}
             onChange={(e) => set((d) => (d.name = e.target.value.trim()))}
           />
+
+          <h3>Brand identity</h3>
+          <p className="hint">
+            The half of a design system colors can't carry. The AI reads all of this and writes
+            slide copy in your voice.
+          </p>
+          {textInput("Tagline", draft.brand?.tagline, (v) => setBrand((b) => (b.tagline = v)), { placeholder: "Robots that pay for themselves" })}
+          {textInput("What the brand is", draft.brand?.description, (v) => setBrand((b) => (b.description = v)), { rows: 2 })}
+          {textInput("Audience", draft.brand?.audience, (v) => setBrand((b) => (b.audience = v)), { placeholder: "Ops leaders at 3PLs and grocery retail" })}
+
+          <h3>Voice &amp; tone</h3>
+          {textInput("Tone", draft.brand?.voice?.tone, (v) => setBrand((b) => ((b.voice = b.voice ?? {}), (b.voice.tone = v))), { placeholder: "confident, concrete, zero hype" })}
+          {listInput("Personality (one per line)", draft.brand?.voice?.personality, (v) => setBrand((b) => ((b.voice = b.voice ?? {}), (b.voice.personality = v))))}
+          {listInput("Do (one per line)", draft.brand?.voice?.dos, (v) => setBrand((b) => ((b.voice = b.voice ?? {}), (b.voice.dos = v))), { placeholder: "lead with numbers\nshort declarative sentences" })}
+          {listInput("Don't (one per line)", draft.brand?.voice?.donts, (v) => setBrand((b) => ((b.voice = b.voice ?? {}), (b.voice.donts = v))), { placeholder: "never say 'revolutionary'" })}
+          {listInput("Preferred terms", draft.brand?.voice?.preferredTerms, (v) => setBrand((b) => ((b.voice = b.voice ?? {}), (b.voice.preferredTerms = v))))}
+          {listInput("Avoid terms", draft.brand?.voice?.avoidTerms, (v) => setBrand((b) => ((b.voice = b.voice ?? {}), (b.voice.avoidTerms = v))))}
+          {textInput("Example copy (a paragraph that sounds like you)", draft.brand?.voice?.exampleCopy, (v) => setBrand((b) => ((b.voice = b.voice ?? {}), (b.voice.exampleCopy = v))), { rows: 3 })}
+
+          <h3>Logos</h3>
+          {(draft.brand?.logos ?? []).map((logo, i) => (
+            <div key={i} className="logo-row">
+              {logo.src && <img src={logo.src} alt={logo.name} />}
+              <input
+                defaultValue={logo.name}
+                placeholder="name"
+                onBlur={(e) => setBrand((b) => (b.logos![i].name = e.target.value))}
+              />
+              <select
+                value={logo.usage ?? "primary"}
+                onChange={(e) => setBrand((b) => (b.logos![i].usage = e.target.value as never))}
+              >
+                {["primary", "mark", "light-bg", "dark-bg"].map((u) => (
+                  <option key={u}>{u}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => setBrand((b) => (b.logos = b.logos!.filter((_, j) => j !== i)))}
+                className="danger"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <div className="btn-row">
+            <button
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = "image/*";
+                input.onchange = () => {
+                  const file = input.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () =>
+                    setBrand((b) => {
+                      b.logos = [
+                        ...(b.logos ?? []),
+                        { name: file.name.replace(/\.[a-z]+$/i, ""), src: String(reader.result), usage: "primary" },
+                      ];
+                    });
+                  reader.readAsDataURL(file);
+                };
+                input.click();
+              }}
+            >
+              + upload logo
+            </button>
+          </div>
+
+          <h3>Imagery</h3>
+          {textInput("Style", draft.brand?.imagery?.style, (v) => setBrand((b) => ((b.imagery = b.imagery ?? {}), (b.imagery.style = v))), { placeholder: "documentary photography, no stock clichés" })}
+          {textInput("Guidance", draft.brand?.imagery?.guidance, (v) => setBrand((b) => ((b.imagery = b.imagery ?? {}), (b.imagery.guidance = v))), { rows: 2 })}
 
           <h3>Colors</h3>
           <div className="color-grid">

@@ -30,9 +30,55 @@ export const FontIdSchema = z.enum(FONT_IDS);
 
 export const HexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "expected #rrggbb hex");
 
+/** A brand asset (URL or data: URL); usable on slides via image elements. */
+export const LogoSchema = z
+  .object({
+    name: z.string(),
+    src: z.string(),
+    usage: z.enum(["primary", "mark", "light-bg", "dark-bg"]).optional(),
+  })
+  .strict();
+export type Logo = z.infer<typeof LogoSchema>;
+
+/**
+ * The non-visual half of a design system: what the brand IS and how it
+ * speaks. The AI reads this from get_design_system, so generated copy —
+ * not just colors — follows the brand.
+ */
+export const BrandSchema = z
+  .object({
+    tagline: z.string().optional(),
+    description: z.string().optional(),
+    audience: z.string().optional(),
+    voice: z
+      .object({
+        tone: z.string().optional(), // e.g. "confident, plain-spoken, no hype"
+        personality: z.array(z.string()).optional(),
+        dos: z.array(z.string()).optional(),
+        donts: z.array(z.string()).optional(),
+        preferredTerms: z.array(z.string()).optional(),
+        avoidTerms: z.array(z.string()).optional(),
+        exampleCopy: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    logos: z.array(LogoSchema).optional(),
+    imagery: z
+      .object({
+        style: z.string().optional(), // e.g. "documentary photography, no stock clichés"
+        guidance: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type Brand = z.infer<typeof BrandSchema>;
+
 export const ThemeTokensSchema = z
   .object({
     name: z.string(),
+    /** Brand identity, voice and assets — optional but strongly encouraged. */
+    brand: BrandSchema.optional(),
     colors: z.record(z.enum(COLOR_ROLES), HexColor),
     fonts: z.object({
       heading: FontIdSchema,

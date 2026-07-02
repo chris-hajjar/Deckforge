@@ -540,6 +540,66 @@ await page4.close();
 // restore the demo deck's theme
 await tool("set_theme", { base: "corporate-bold", overrides: { colors: { accent: "#6d28d9", "accent-alt": "#d97706" } } });
 
+// ---------- 11. template intelligence + brand depth ----------
+console.log("[11] template intelligence (find/mix-match) + brand voice");
+// intent search: "kpi" appears nowhere in template names — structure matching finds it
+const found = await tool("find_templates", { query: "kpi numbers for the board" });
+check(
+  "find_templates infers the right template from intent",
+  found.results.length > 0 && found.results[0].facets?.layout === "metrics",
+  found.results[0]?.name,
+);
+// mix & match: pull the metric row from the found template into the Roadmap slide
+const roadmapId = (await tool("get_deck")).slides.find((s: { name: string }) => s.name === "Roadmap").id;
+const mixed = await tool("copy_from_template", {
+  templateName: found.results[0].name,
+  slideId: roadmapId,
+  elementType: "row",
+});
+check("copy_from_template mixes an element across templates", !!mixed.elementId);
+await tool("delete_element", { elementId: mixed.elementId }); // keep the artifact deck tidy
+
+// brand depth: voice/tone/logos registered and surfaced to the AI
+await tool("register_theme", {
+  name: "atlas-brand",
+  base: "corporate-bold",
+  colors: { accent: "#6d28d9", "accent-alt": "#d97706" },
+  brand: {
+    tagline: "Robots that pay for themselves",
+    audience: "Ops leaders at 3PLs and grocery retail",
+    voice: {
+      tone: "confident, concrete, zero hype",
+      dos: ["lead with numbers", "short declarative sentences"],
+      donts: ["never say 'revolutionary'"],
+      avoidTerms: ["solution", "synergy"],
+    },
+    logos: [{ name: "wordmark", src: "data:image/png;base64,aGk=", usage: "primary" }],
+    imagery: { style: "documentary warehouse photography" },
+  },
+});
+await tool("set_theme", { base: "atlas-brand" });
+const dsBrand = await tool("get_design_system");
+check(
+  "AI sees brand voice + logos in get_design_system",
+  dsBrand.brand?.voice?.tone?.includes("zero hype") && dsBrand.brand?.logos?.length === 1,
+);
+check("brandNote instructs copy to follow the voice", dsBrand.brandNote.includes("voice"));
+
+// the design tab exposes the brand editor
+const page5 = await browser.newPage({ viewport: { width: 1600, height: 1400 } });
+await page5.goto(BASE);
+await page5.waitForSelector(".slide-frame");
+await page5.getByRole("button", { name: "Design systems" }).click();
+await page5.locator(".theme-card", { hasText: "atlas-brand" }).getByRole("button", { name: "edit" }).click();
+await page5.waitForSelector(".theme-editor");
+check(
+  "brand editor shows voice fields populated",
+  await page5.locator(".theme-editor textarea").first().isVisible(),
+);
+await page5.screenshot({ path: join(outDir, "10-brand-editor.png") });
+await page5.close();
+await tool("set_theme", { base: "corporate-bold", overrides: { colors: { accent: "#6d28d9", "accent-alt": "#d97706" } } });
+
 await browser.close();
 await ai.close();
 
