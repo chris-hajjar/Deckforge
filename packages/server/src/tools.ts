@@ -414,6 +414,13 @@ export function registerTools(
         const result = store.mutate((draft) => {
           const slide = requireSlide(draft, slideId) as Slide & { overlays?: DeckNode[] };
           const source = library.findTemplateElement(templateName, { elementId, elementType });
+          // template ids may collide with deck ids (templates saved FROM a
+          // deck keep them) — strip every id so assignIds regenerates all
+          const stripIds = (el: Record<string, unknown>) => {
+            delete el.id;
+            for (const c of (el.children as Record<string, unknown>[]) ?? []) stripIds(c);
+          };
+          stripIds(source as unknown as Record<string, unknown>);
           const withIds = assignIds(draft, source as unknown as Record<string, unknown>) as unknown as DeckNode;
           newId = withIds.id;
           if (withIds.frame && !parentId) {

@@ -558,6 +558,15 @@ const mixed = await tool("copy_from_template", {
 });
 check("copy_from_template mixes an element across templates", !!mixed.elementId);
 await tool("delete_element", { elementId: mixed.elementId }); // keep the artifact deck tidy
+// regression guard: the copy got FRESH ids, so deleting it must not touch
+// the slide the template was originally saved from
+const tractionAfter = await tool("get_slide", {
+  slideId: (await tool("get_deck")).slides.find((s: { name: string }) => s.name?.startsWith("Traction")).id,
+});
+check(
+  "copying/deleting never mutates the template's source slide",
+  JSON.stringify(tractionAfter.slide).includes("metricCard"),
+);
 
 // brand depth: voice/tone/logos registered and surfaced to the AI
 await tool("register_theme", {
