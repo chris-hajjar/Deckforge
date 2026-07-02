@@ -67,9 +67,86 @@ function frameOf(xfrm: unknown, t: Transform) {
   };
 }
 
-function solidHex(node: unknown): string | undefined {
-  const val = get(node, "a:solidFill", "a:srgbClr", "@val");
-  return typeof val === "string" ? `#${val.toLowerCase()}` : undefined;
+/** Theme color scheme (accent1…6, dk/lt) resolved from ppt/theme/theme1.xml. */
+type ColorScheme = Record<string, string>;
+
+// default color map: bg/tx names alias the theme's lt/dk slots
+const SCHEME_ALIASES: Record<string, string> = { bg1: "lt1", tx1: "dk1", bg2: "lt2", tx2: "dk2" };
+
+function parseTheme(themeXml: unknown): ColorScheme {
+  const scheme: ColorScheme = {};
+  const clrScheme = get(themeXml, "a:theme", "a:themeElements", "a:clrScheme") as XmlNode | undefined;
+  if (!clrScheme) return scheme;
+  for (const [key, val] of Object.entries(clrScheme)) {
+    if (!key.startsWith("a:")) continue;
+    const name = key.slice(2);
+    const srgb = get(val, "a:srgbClr", "@val");
+    const sys = get(val, "a:sysClr", "@lastClr");
+    const hex = typeof srgb === "string" ? srgb : typeof sys === "string" ? sys : undefined;
+    if (hex) scheme[name] = `#${hex.toLowerCase()}`;
+  }
+  return scheme;
+}
+
+const clamp255 = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+
+/** Apply DrawingML color transforms (approximated in sRGB space). */
+function applyTransforms(hex: string, clrNode: XmlNode): string {
+  let [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const pct = (name: string): number | undefined => {
+    const v = get(clrNode, name, "@val");
+    return v !== undefined ? Number(v) / 100000 : undefined;
+  };
+  const lumMod = pct("a:lumMod");
+  const lumOff = pct("a:lumOff");
+  const shade = pct("a:shade");
+  const tint = pct("a:tint");
+  const map = (fn: (v: number) => number) => {
+    r = clamp255(fn(r));
+    g = clamp255(fn(g));
+    b = clamp255(fn(b));
+  };
+  if (lumMod !== undefined) map((v) => v * lumMod);
+  if (lumOff !== undefined) map((v) => v + 255 * lumOff);
+  if (shade !== undefined) map((v) => v * shade);
+  if (tint !== undefined) map((v) => v * tint + 255 * (1 - tint));
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Resolve any DrawingML color holder (srgbClr / schemeClr / sysClr). */
+function colorOf(holder: unknown, scheme: ColorScheme): string | undefined {
+  const srgb = get(holder, "a:srgbClr") as XmlNode | undefined;
+  if (srgb && typeof srgb["@val"] === "string") {
+    return applyTransforms(`#${(srgb["@val"] as string).toLowerCase()}`, srgb);
+  }
+  const schemeClr = get(holder, "a:schemeClr") as XmlNode | undefined;
+  if (schemeClr && typeof schemeClr["@val"] === "string") {
+    const name = schemeClr["@val"] as string;
+    const base = scheme[name] ?? scheme[SCHEME_ALIASES[name]];
+    if (base) return applyTransforms(base, schemeClr);
+    return undefined;
+  }
+  const sys = get(holder, "a:sysClr") as XmlNode | undefined;
+  if (sys && typeof sys["@lastClr"] === "string") {
+    return `#${(sys["@lastClr"] as string).toLowerCase()}`;
+  }
+  return undefined;
+}
+
+/** Solid fill on a properties node, resolved through the theme. */
+function solidHex(node: unknown, scheme: ColorScheme = {}): string | undefined {
+  const fill = get(node, "a:solidFill");
+  if (!fill) return undefined;
+  return colorOf(fill, scheme);
+}
+
+/** Fallback fill/line color from a shape's <p:style> theme references. */
+function styleRefColor(sp: XmlNode, ref: "a:fillRef" | "a:lnRef", scheme: ColorScheme): string | undefined {
+  const refNode = get(sp, "p:style", ref);
+  if (!refNode) return undefined;
+  const idx = Number(get(refNode, "@idx") ?? 0);
+  if (idx === 0) return undefined; // idx 0 = no style fill
+  return colorOf(refNode, scheme);
 }
 
 const GEOM_MAP: Record<string, string> = {
@@ -89,9 +166,11 @@ interface ImportCtx {
   notes: string[];
   media: Map<string, string>; // rel id → data URL
   seq: number;
+  /** theme color scheme from ppt/theme/theme1.xml */
+  scheme: ColorScheme;
 }
 
-function textFromBody(txBody: unknown): {
+function textFromBody(txBody: unknown, scheme: ColorScheme): {
   text: string;
   fontSize?: number;
   bold?: boolean;
@@ -107,13 +186,16 @@ function textFromBody(txBody: unknown): {
   let color: string | undefined;
   let align: "left" | "center" | "right" | undefined;
   for (const p of paras) {
-    const runs = arr(p["a:r"]);
-    const line = runs
+    const runs = [...arr(p["a:r"]), ...arr(p["a:fld"])];
+    let line = runs
       .map((r) => {
         const t = r["a:t"];
         return typeof t === "string" ? t : typeof t === "number" ? String(t) : "";
       })
       .join("");
+    // explicit line breaks (order within the paragraph is approximated)
+    const brs = arr(p["a:br"]).length;
+    for (let i = 0; i < brs; i++) line += "\n";
     lines.push(line);
     const rPr = runs.length ? (runs[0]["a:rPr"] as XmlNode | undefined) : undefined;
     if (rPr && fontSize === undefined && rPr["@sz"] !== undefined) {
@@ -121,7 +203,7 @@ function textFromBody(txBody: unknown): {
     }
     if (rPr && bold === undefined && rPr["@b"] !== undefined) bold = rPr["@b"] === "1";
     if (rPr && italic === undefined && rPr["@i"] !== undefined) italic = rPr["@i"] === "1";
-    if (rPr && color === undefined) color = solidHex(rPr);
+    if (rPr && color === undefined) color = solidHex(rPr, scheme);
     const algn = get(p, "a:pPr", "@algn");
     if (align === undefined && (algn === "ctr" || algn === "r" || algn === "l")) {
       align = algn === "ctr" ? "center" : algn === "r" ? "right" : "left";
@@ -137,11 +219,31 @@ function importShape(sp: XmlNode, t: Transform, ctx: ImportCtx): DeckNode | null
   if (!frame) return null;
   const spPr = sp["p:spPr"] as XmlNode;
   const prst = get(spPr, "a:prstGeom", "@prst") as string | undefined;
-  const fill = solidHex(spPr);
-  const lineColor = solidHex(get(spPr, "a:ln"));
+  const noFill = get(spPr, "a:noFill") !== undefined;
+  // explicit solid fill → style fillRef (theme) → none
+  const fill = noFill ? undefined : (solidHex(spPr, ctx.scheme) ?? styleRefColor(sp, "a:fillRef", ctx.scheme));
+  // a picture-filled shape imports as an image at the shape's frame
+  const picRel = get(spPr, "a:blipFill", "a:blip", "@r:embed") as string | undefined;
+  if (picRel && ctx.media.get(picRel)) {
+    return {
+      id: `imp-${ctx.seq++}`,
+      type: "image",
+      src: ctx.media.get(picRel)!,
+      alt: (get(sp, "p:nvSpPr", "p:cNvPr", "@name") as string) ?? "imported image",
+      frame,
+    } as DeckNode;
+  }
+  const lnNoFill = get(spPr, "a:ln", "a:noFill") !== undefined;
+  const lineColor = lnNoFill
+    ? undefined
+    : (solidHex(get(spPr, "a:ln"), ctx.scheme) ??
+       (get(spPr, "a:ln") ? styleRefColor(sp, "a:lnRef", ctx.scheme) : undefined));
   const lineW = get(spPr, "a:ln", "@w");
   const body = sp["p:txBody"];
-  const txt = body ? textFromBody(body) : null;
+  const txt = body ? textFromBody(body, ctx.scheme) : null;
+
+  // nothing visible (no fill, no outline, no text) → layout helper, skip it
+  if (!fill && !lineColor && !txt) return null;
 
   // pure text box: no geometry fill → text element
   if (txt && !fill) {
@@ -239,7 +341,9 @@ function importShapeTree(container: XmlNode, t: Transform, ctx: ImportCtx): Deck
       id: `imp-${ctx.seq++}`,
       type: "shape",
       shape: "line",
-      ...(solidHex(get(cxn, "p:spPr", "a:ln")) ? { fill: solidHex(get(cxn, "p:spPr", "a:ln")) } : {}),
+      ...(solidHex(get(cxn, "p:spPr", "a:ln"), ctx.scheme)
+        ? { fill: solidHex(get(cxn, "p:spPr", "a:ln"), ctx.scheme) }
+        : {}),
       frame: { ...frame, h: Math.max(8, frame.h) },
     } as DeckNode);
   }
@@ -261,11 +365,16 @@ export async function importPptx(buffer: Buffer): Promise<ImportedSlide[]> {
     .sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
   if (slidePaths.length === 0) throw new Error("No slides found — is this a .pptx file?");
 
+  // the theme's color scheme resolves schemeClr/fillRef references
+  let scheme: ColorScheme = {};
+  const themeFile = zip.file("ppt/theme/theme1.xml");
+  if (themeFile) scheme = parseTheme(parser.parse(await themeFile.async("string")));
+
   const out: ImportedSlide[] = [];
   for (const path of slidePaths) {
     const n = path.match(/\d+/)![0];
     const xml = parser.parse(await zip.file(path)!.async("string"));
-    const ctx: ImportCtx = { notes: [], media: new Map(), seq: 1 };
+    const ctx: ImportCtx = { notes: [], media: new Map(), seq: 1, scheme };
 
     // relationships → embedded media as data URLs
     const relsFile = zip.file(`ppt/slides/_rels/slide${n}.xml.rels`);
@@ -285,7 +394,22 @@ export async function importPptx(buffer: Buffer): Promise<ImportedSlide[]> {
 
     const spTree = get(xml, "p:sld", "p:cSld", "p:spTree") as XmlNode | undefined;
     const overlays = spTree ? importShapeTree(spTree, IDENTITY, ctx) : [];
-    const bg = solidHex(get(xml, "p:sld", "p:cSld", "p:bg", "p:bgPr"));
+
+    // background: solid (literal or theme), style ref, or full-bleed picture
+    const bgPr = get(xml, "p:sld", "p:cSld", "p:bg", "p:bgPr");
+    const bgRef = get(xml, "p:sld", "p:cSld", "p:bg", "p:bgRef");
+    let bg = solidHex(bgPr, scheme) ?? (bgRef ? colorOf(bgRef, scheme) : undefined);
+    const bgPicRel = get(bgPr, "a:blipFill", "a:blip", "@r:embed") as string | undefined;
+    if (bgPicRel && ctx.media.get(bgPicRel)) {
+      overlays.unshift({
+        id: `imp-bg-${n}`,
+        type: "image",
+        src: ctx.media.get(bgPicRel)!,
+        alt: "background",
+        frame: { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H },
+      } as never);
+      bg = bg ?? undefined;
+    }
 
     out.push({
       slide: {

@@ -31,6 +31,9 @@ for (let i = 0; i < 40; i++) { try { await fetch("http://localhost:4820/api/deck
 const html = await (await fetch("http://localhost:4820/")).text();
 console.log(html.includes("Deckforge") ? "✓ bundled canvas serves at :4820" : "✗ canvas missing");
 
+const gs = await (await fetch("http://localhost:4820/api/google/status")).json();
+console.log(gs.configured === false && gs.connected === false ? "✓ google endpoints live (unconfigured)" : "✗ google status wrong");
+
 const pptx = await fetch("http://localhost:4820/api/export.pptx");
 const buf = Buffer.from(await pptx.arrayBuffer());
 console.log(buf.subarray(0, 2).toString() === "PK" ? `✓ pptx export from bundle (${(buf.length / 1024).toFixed(0)} KB)` : "✗ export broken");

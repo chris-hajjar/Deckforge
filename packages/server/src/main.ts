@@ -15,6 +15,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { DeckStore } from "./store.js";
 import { Library } from "./library.js";
+import { GoogleSlides } from "./google.js";
 import { registerTools } from "./tools.js";
 import { createHttpServer } from "./http.js";
 
@@ -43,7 +44,8 @@ const canvasCandidates = [
   resolve(here, "canvas"),
 ].filter((p): p is string => !!p);
 const canvasDist = canvasCandidates.find((p) => existsSync(join(p, "index.html"))) ?? canvasCandidates[1];
-const httpServer = createHttpServer(store, canvasDist, library);
+const google = new GoogleSlides(projectDir);
+const httpServer = createHttpServer(store, canvasDist, library, google);
 httpServer.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
     log(`port ${port} is already in use — is another Deckforge running? (set DECKFORGE_PORT to change)`);
@@ -56,7 +58,7 @@ httpServer.listen(port, () => log(`canvas + API: http://localhost:${port}`));
 
 if (stdio) {
   const mcp = new McpServer({ name: "deckforge", version: "2.0.0" });
-  registerTools(mcp, store, projectDir, library);
+  registerTools(mcp, store, projectDir, library, google);
   await mcp.connect(new StdioServerTransport());
   log("MCP connected over stdio");
 } else {

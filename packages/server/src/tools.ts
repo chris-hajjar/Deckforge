@@ -19,7 +19,8 @@ import {
 } from "@deckforge/schema";
 import { THEMES } from "@deckforge/themes";
 import { solveSlide } from "@deckforge/layout";
-import { compileDeckToFile } from "@deckforge/compile-pptx";
+import { compileDeckToBuffer, compileDeckToFile } from "@deckforge/compile-pptx";
+import type { GoogleSlides } from "./google.js";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { DeckStore, ApplyResult } from "./store.js";
@@ -160,6 +161,7 @@ export function registerTools(
   store: DeckStore,
   projectDir: string,
   library: Library,
+  googleRef?: GoogleSlides,
 ) {
   // ---------- read ----------
   server.registerTool(
@@ -847,6 +849,33 @@ export function registerTools(
           draft.title = title;
         }, "ai");
         return summarize(result);
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "open_in_google_slides",
+    {
+      description:
+        "Upload the current deck to the user's Google Drive as a NATIVE, editable Google Slides presentation and return its edit URL. Requires the user to have connected Google (the canvas 'Slides' button walks them through it); if not configured/connected, this returns instructions instead of failing.",
+      inputSchema: {},
+    },
+    async () => {
+      const st = googleRef?.status() ?? { configured: false, connected: false };
+      if (!st.configured || !st.connected) {
+        return ok({
+          connected: false,
+          instructions: st.configured
+            ? "Google is configured but the user hasn't signed in — ask them to click the 'Slides' button at http://localhost:4820 and complete the Google sign-in, then call this again."
+            : "Google OAuth isn't set up for this project — ask the user to click the 'Slides' button at http://localhost:4820 and follow the one-time setup.",
+        });
+      }
+      try {
+        const buf = await compileDeckToBuffer(store.deck);
+        const url = await googleRef!.uploadAsSlides(buf, store.deck.title);
+        return ok({ connected: true, url });
       } catch (e) {
         return fail((e as Error).message);
       }

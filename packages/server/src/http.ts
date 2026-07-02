@@ -14,8 +14,14 @@ import { compileDeckToBuffer } from "@deckforge/compile-pptx";
 import { BUILTIN_THEMES, THEMES } from "@deckforge/themes";
 import type { DeckStore } from "./store.js";
 import type { Library } from "./library.js";
+import type { GoogleSlides } from "./google.js";
 
-export function createHttpServer(store: DeckStore, canvasDist: string, library: Library): Server {
+export function createHttpServer(
+  store: DeckStore,
+  canvasDist: string,
+  library: Library,
+  google: GoogleSlides,
+): Server {
   const app = express();
   app.use(express.json({ limit: "4mb" }));
 
@@ -130,6 +136,61 @@ export function createHttpServer(store: DeckStore, canvasDist: string, library: 
       }
     },
   );
+
+  // ---------- Google Slides (OAuth like a normal app) ----------
+  const redirectUri = (req: { headers: { host?: string } }) =>
+    `http://${req.headers.host ?? "localhost:4820"}/api/google/callback`;
+
+  app.get("/api/google/status", (_req, res) => res.json(google.status()));
+
+  app.post("/api/google/config", (req, res) => {
+    try {
+      google.saveConfig(req.body ?? {});
+      res.json(google.status());
+    } catch (e) {
+      res.status(422).json({ error: (e as Error).message });
+    }
+  });
+
+  app.get("/api/google/connect", (req, res) => {
+    try {
+      res.redirect(google.authUrl(redirectUri(req)));
+    } catch (e) {
+      res.status(422).send((e as Error).message);
+    }
+  });
+
+  app.get("/api/google/callback", async (req, res) => {
+    try {
+      await google.handleCallback(
+        String(req.query.code ?? ""),
+        String(req.query.state ?? ""),
+        redirectUri(req),
+      );
+      res.send(
+        "<body style='font-family:sans-serif;display:grid;place-items:center;height:100vh'>" +
+          "<div><h2>✓ Connected to Google</h2><p>You can close this tab and return to Deckforge.</p></div>" +
+          "<script>setTimeout(()=>window.close(),1500)</script></body>",
+      );
+    } catch (e) {
+      res.status(422).send(`Sign-in failed: ${(e as Error).message}`);
+    }
+  });
+
+  app.post("/api/google/open-in-slides", async (_req, res) => {
+    try {
+      const buf = await compileDeckToBuffer(store.deck);
+      const url = await google.uploadAsSlides(buf, store.deck.title);
+      res.json({ url });
+    } catch (e) {
+      res.status(422).json({ error: (e as Error).message });
+    }
+  });
+
+  app.post("/api/google/disconnect", (_req, res) => {
+    google.disconnect();
+    res.json(google.status());
+  });
 
   app.get("/api/export.pptx", async (_req, res) => {
     try {

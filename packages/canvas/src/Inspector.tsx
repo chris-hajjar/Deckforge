@@ -718,6 +718,36 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
             <span className="chip">slide</span>
             <code>{slide.id}</code>
           </div>
+          <label>Slide actions</label>
+          <Row>
+            <button
+              disabled={slideIndex === 0}
+              onClick={() =>
+                sendPatches([{ op: "move", from: slidePtr, path: `/slides/${slideIndex - 1}` } as unknown as Operation])
+              }
+            >
+              ↑ move up
+            </button>
+            <button
+              disabled={slideIndex >= deck.slides.length - 1}
+              onClick={() =>
+                sendPatches([{ op: "move", from: slidePtr, path: `/slides/${slideIndex + 1}` } as unknown as Operation])
+              }
+            >
+              ↓ move down
+            </button>
+            <button
+              className="danger"
+              disabled={deck.slides.length <= 1}
+              onClick={() => {
+                if (window.confirm(`Delete slide ${slideIndex + 1}?`)) {
+                  sendPatches([{ op: "remove", path: slidePtr } as Operation]);
+                }
+              }}
+            >
+              delete
+            </button>
+          </Row>
           <label>Name</label>
           <input key={slide.id} defaultValue={slide.name ?? ""} onBlur={(e) => setSlideField("name", e.target.value)} />
           <Stepper

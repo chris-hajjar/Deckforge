@@ -57,17 +57,18 @@ header {
 .thumb {
   border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
   cursor: pointer; background: #fff; transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+.thumb-num {
+  position: absolute; left: 6px; bottom: 6px; min-width: 20px; text-align: center;
+  background: rgba(51, 48, 42, 0.75); color: #fff; font-size: 10.5px; font-weight: 600;
+  border-radius: 6px; padding: 1px 5px; pointer-events: none;
 }
 .thumb:hover { border-color: var(--muted); }
 .thumb.active { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(43, 140, 255, 0.20); }
-.thumb-meta {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 4px 8px; background: var(--panel-2); font-size: 11px; color: var(--muted);
-}
-.thumb-actions button, .add-slide {
+.add-slide {
   background: none; border: none; color: var(--muted); cursor: pointer; font-size: 11px;
 }
-.thumb-actions button:hover { color: var(--text); }
 .add-slide {
   border: 1px dashed var(--line); border-radius: 10px; padding: 11px; color: var(--muted);
 }
@@ -340,3 +341,27 @@ hr { border: none; border-top: 1px solid var(--line-soft); margin: 12px 0 4px; w
 .inspector > * { flex-shrink: 0; }
 .inspector textarea { resize: vertical; min-height: 72px; }
 .new-ds { width: 100%; padding: 9px; }
+
+/* google slides button + setup modal */
+.google-btn { display: inline-flex; align-items: center; gap: 7px; }
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(40, 36, 28, 0.4); z-index: 60;
+  display: grid; place-items: center;
+}
+.modal {
+  background: var(--panel); border-radius: 14px; padding: 22px 26px; width: 560px;
+  max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow-soft);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.modal h2 { font-size: 16px; margin: 0; }
+.modal label {
+  font-size: 10.5px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.5px; margin-top: 6px;
+}
+.modal input {
+  background: #fff; border: 1px solid var(--line); color: var(--text);
+  border-radius: 9px; padding: 7px 9px; font-size: 13px; width: 100%;
+}
+.modal input:focus { outline: none; border-color: var(--brand); }
+.setup-steps { margin: 0 0 4px 18px; display: flex; flex-direction: column; gap: 4px; }
+.setup-steps code { background: var(--panel-2); padding: 1px 5px; border-radius: 5px; font-size: 11px; }

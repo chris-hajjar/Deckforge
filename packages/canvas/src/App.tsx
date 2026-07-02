@@ -16,6 +16,15 @@ import { useDeck } from "./useDeck.js";
 
 type Tab = "deck" | "design" | "templates";
 
+const GOOGLE_G = (
+  <svg width="15" height="15" viewBox="0 0 48 48" aria-hidden="true">
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+  </svg>
+);
+
 export function App() {
   const { state, sendPatches } = useDeck();
   const [slideIndex, setSlideIndex] = useState(0);
@@ -25,6 +34,8 @@ export function App() {
   const [sideTab, setSideTab] = useState<"inspect" | "code">("inspect");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<Array<{ name: string; description?: string }>>([]);
+  const [googleSetup, setGoogleSetup] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const fetchTemplates = () =>
@@ -119,6 +130,34 @@ export function App() {
   const activateTheme = (name: string) =>
     sendPatches([{ op: "replace", path: "/theme", value: { base: name } }]);
 
+  const openInSlides = async () => {
+    const st = await fetch("/api/google/status").then((r) => r.json());
+    if (!st.configured) {
+      setGoogleSetup(true);
+      return;
+    }
+    if (!st.connected) {
+      window.open("/api/google/connect", "_blank");
+      setGoogleBusy("waiting for Google sign-in…");
+      for (let i = 0; i < 80; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = await fetch("/api/google/status").then((r) => r.json());
+        if (s.connected) break;
+        if (i === 79) {
+          setGoogleBusy(null);
+          alert("Sign-in wasn't completed — finish it in the Google tab, then click again.");
+          return;
+        }
+      }
+    }
+    setGoogleBusy("uploading to Google Slides…");
+    const res = await fetch("/api/google/open-in-slides", { method: "POST" });
+    const d = await res.json();
+    setGoogleBusy(null);
+    if (!res.ok) alert(`Google Slides: ${d.error}`);
+    else window.open(d.url, "_blank");
+  };
+
   if (presenting) {
     return (
       <Present deck={deck} tokens={tokens} startIndex={safeIndex} onExit={() => setPresenting(false)} />
@@ -145,21 +184,7 @@ export function App() {
     setSlideIndex(deck.slides.length);
   };
 
-  const deleteSlide = (i: number) => {
-    if (deck.slides.length <= 1) return;
-    sendPatches([{ op: "remove", path: `/slides/${i}` } as Operation]);
-    setSlideIndex(Math.max(0, i - 1));
-    setSelectedId(null);
-  };
 
-  const moveSlide = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= deck.slides.length) return;
-    sendPatches([
-      { op: "move", from: `/slides/${i}`, path: `/slides/${j}` } as unknown as Operation,
-    ]);
-    setSlideIndex(j);
-  };
 
   return (
     <div className="shell">
@@ -201,10 +226,58 @@ export function App() {
         <button className="present-btn" onClick={() => setPresenting(true)}>
           ▶ Present
         </button>
+        <button className="present-btn google-btn" onClick={openInSlides} disabled={googleBusy != null} title="Upload the deck to your Google Drive as a native Slides file and open it">
+          {GOOGLE_G} {googleBusy ?? "Slides"}
+        </button>
         <a className="export" href="/api/export.pptx">
           Export .pptx
         </a>
       </header>
+
+      {googleSetup && (
+        <div className="modal-backdrop" onClick={() => setGoogleSetup(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Connect Google Slides</h2>
+            <p className="hint">
+              One-time setup by the app owner — after this, anyone using this Deckforge can sign in
+              with their own Google account, like any normal app:
+            </p>
+            <ol className="hint setup-steps">
+              <li>Go to <b>console.cloud.google.com</b> → create (or pick) a project</li>
+              <li>APIs &amp; Services → <b>Enable APIs</b> → enable <b>Google Drive API</b></li>
+              <li>APIs &amp; Services → <b>OAuth consent screen</b> → External → add yourself as a test user</li>
+              <li>Credentials → <b>Create credentials → OAuth client ID</b> → type <b>Web application</b>, and add <code>http://localhost:4820/api/google/callback</code> as an authorized redirect URI</li>
+              <li>Paste the Client ID and Client Secret below</li>
+            </ol>
+            <label>Client ID</label>
+            <input id="g-client-id" placeholder="xxxxx.apps.googleusercontent.com" />
+            <label>Client secret</label>
+            <input id="g-client-secret" placeholder="GOCSPX-…" />
+            <div className="btn-row">
+              <button
+                className="primary"
+                onClick={async () => {
+                  const client_id = (document.getElementById("g-client-id") as HTMLInputElement).value;
+                  const client_secret = (document.getElementById("g-client-secret") as HTMLInputElement).value;
+                  const res = await fetch("/api/google/config", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ client_id, client_secret }),
+                  });
+                  if (!res.ok) alert((await res.json()).error);
+                  else {
+                    setGoogleSetup(false);
+                    openInSlides();
+                  }
+                }}
+              >
+                Save &amp; sign in
+              </button>
+              <button onClick={() => setGoogleSetup(false)}>cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {tab === "design" && <DesignTab onActivate={activateTheme} />}
       {tab === "templates" && (
@@ -224,22 +297,14 @@ export function App() {
             <div
               key={s.id}
               className={`thumb ${i === safeIndex ? "active" : ""}`}
+              title={s.name ?? s.id}
               onClick={() => {
                 setSlideIndex(i);
                 setSelectedId(null);
               }}
             >
               <SlideCanvas deck={deck} slide={s} tokens={tokens} scale={0.117} interactive={false} />
-              <div className="thumb-meta">
-                <span>
-                  {i + 1}. {s.name ?? s.id}
-                </span>
-                <span className="thumb-actions">
-                  <button onClick={(e) => (e.stopPropagation(), moveSlide(i, -1))}>↑</button>
-                  <button onClick={(e) => (e.stopPropagation(), moveSlide(i, 1))}>↓</button>
-                  <button onClick={(e) => (e.stopPropagation(), deleteSlide(i))}>✕</button>
-                </span>
-              </div>
+              <span className="thumb-num">{i + 1}</span>
             </div>
           ))}
           <button className="add-slide" onClick={addSlide}>
