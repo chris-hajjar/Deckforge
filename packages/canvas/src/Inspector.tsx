@@ -67,6 +67,66 @@ function Row({ children }: { children: React.ReactNode }) {
   return <div className="btn-row wrap">{children}</div>;
 }
 
+/**
+ * Number field with −/+ steppers. With a `scale`, the steppers walk the
+ * brand scale itself (so padding never gets stuck between snap points);
+ * typed values still snap server-side.
+ */
+function Stepper({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  scale,
+  decimals = 0,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  scale?: readonly number[];
+  decimals?: number;
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, v));
+  const round = (v: number) => Number(v.toFixed(decimals));
+  const bump = (dir: 1 | -1) => {
+    if (scale && scale.length) {
+      const sorted = [...scale].sort((a, b) => a - b);
+      const next =
+        dir === 1
+          ? sorted.find((s) => s > value)
+          : [...sorted].reverse().find((s) => s < value);
+      if (next !== undefined) onChange(clamp(next));
+      return;
+    }
+    onChange(round(clamp(value + dir * step)));
+  };
+  return (
+    <>
+      <label>{label}</label>
+      <div className="stepper">
+        <button onClick={() => bump(-1)} aria-label={`decrease ${label}`}>−</button>
+        <input
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          step={scale ? undefined : step}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) onChange(round(clamp(v)));
+          }}
+        />
+        <button onClick={() => bump(1)} aria-label={`increase ${label}`}>+</button>
+      </div>
+    </>
+  );
+}
+
 export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, onDeselect }: Props) {
   const debounce = useRef<ReturnType<typeof setTimeout>>();
   const sendDebounced = (patches: Operation[]) => {
@@ -422,26 +482,23 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
             </button>
           ))}
         </Row>
-        <label>
-          Line height <span className="val">{(style.lineHeight as number) ?? "auto"}</span>
-        </label>
-        <input
-          type="range"
+        <Stepper
+          label="Line height"
+          value={(style.lineHeight as number) ?? 1.35}
           min={0.9}
           max={2.5}
           step={0.05}
-          value={(style.lineHeight as number) ?? 1.35}
-          onChange={(e) => mergeObj("style", "lineHeight", Number(e.target.value), true)}
+          decimals={2}
+          onChange={(v) => mergeObj("style", "lineHeight", v, true)}
         />
-        <label>
-          Letter spacing <span className="val">{(style.letterSpacing as number) ?? 0}px</span>
-        </label>
-        <input
-          type="range"
+        <Stepper
+          label="Letter spacing (px)"
+          value={(style.letterSpacing as number) ?? 0}
           min={0}
           max={12}
-          value={(style.letterSpacing as number) ?? 0}
-          onChange={(e) => mergeObj("style", "letterSpacing", Number(e.target.value), true)}
+          step={0.5}
+          decimals={1}
+          onChange={(v) => mergeObj("style", "letterSpacing", v, true)}
         />
       </>
     );
@@ -451,16 +508,22 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
     const style = (n.style ?? {}) as Record<string, unknown>;
     return (
       <>
-        <label>
-          Padding <span className="val">{(style.padding as number) ?? 0}px</span>
-        </label>
-        <input type="range" min={0} max={spacingMax} value={(style.padding as number) ?? 0}
-          onChange={(e) => mergeObj("style", "padding", Number(e.target.value), true)} />
-        <label>
-          Gap <span className="val">{(style.gap as number) ?? 16}px</span>
-        </label>
-        <input type="range" min={0} max={spacingMax} value={(style.gap as number) ?? 16}
-          onChange={(e) => mergeObj("style", "gap", Number(e.target.value), true)} />
+        <Stepper
+          label="Padding (px)"
+          value={(style.padding as number) ?? 0}
+          min={0}
+          max={spacingMax}
+          scale={tokens.spacingScale}
+          onChange={(v) => mergeObj("style", "padding", v, true)}
+        />
+        <Stepper
+          label="Gap (px)"
+          value={(style.gap as number) ?? 16}
+          min={0}
+          max={spacingMax}
+          scale={tokens.spacingScale}
+          onChange={(v) => mergeObj("style", "gap", v, true)}
+        />
         <label>Background</label>
         <Swatches tokens={tokens} value={style.background as string | undefined} allowNone
           onPick={(role) => mergeObj("style", "background", role)} />
@@ -636,11 +699,14 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
           {node.type === "table" && tablePanel(node)}
           {node.type === "chart" && chartPanel(node)}
           {node.type === "spacer" && (
-            <>
-              <label>Size <span className="val">{node.size}px</span></label>
-              <input type="range" min={0} max={spacingMax} value={node.size}
-                onChange={(e) => sendDebounced([{ op: "replace", path: `${pointer}/size`, value: Number(e.target.value) } as Operation])} />
-            </>
+            <Stepper
+              label="Size (px)"
+              value={node.size}
+              min={0}
+              max={spacingMax}
+              scale={tokens.spacingScale}
+              onChange={(v) => sendDebounced([{ op: "replace", path: `${pointer}/size`, value: v } as Operation])}
+            />
           )}
           <hr />
           {marginSection(node)}
@@ -654,9 +720,14 @@ export function Inspector({ deck, tokens, slideIndex, selectedId, sendPatches, o
           </div>
           <label>Name</label>
           <input key={slide.id} defaultValue={slide.name ?? ""} onBlur={(e) => setSlideField("name", e.target.value)} />
-          <label>Padding <span className="val">{slide.padding ?? 64}px</span></label>
-          <input type="range" min={0} max={128} value={slide.padding ?? 64}
-            onChange={(e) => sendDebounced([{ op: "replace", path: `${slidePtr}/padding`, value: Number(e.target.value) } as Operation])} />
+          <Stepper
+            label="Padding (px)"
+            value={slide.padding ?? 64}
+            min={0}
+            max={128}
+            scale={tokens.spacingScale}
+            onChange={(v) => sendDebounced([{ op: "replace", path: `${slidePtr}/padding`, value: v } as Operation])}
+          />
           <label>Background</label>
           <Swatches tokens={tokens} value={slide.background} allowNone
             onPick={(role) => (role ? setSlideField("background", role) : setSlideField("background", undefined))} />

@@ -20,7 +20,15 @@ import {
   type Slide,
   type ThemeTokens,
 } from "@deckforge/schema";
-import { THEMES, mergeTheme, registerTheme, type ThemePatch } from "@deckforge/themes";
+import {
+  BUILTIN_THEMES,
+  THEMES,
+  corporateBold,
+  mergeTheme,
+  minimalistDark,
+  registerTheme,
+  type ThemePatch,
+} from "@deckforge/themes";
 
 /** Auto-derived structure summary; makes big libraries searchable. */
 export interface TemplateFacets {
@@ -270,10 +278,13 @@ export class Library {
     rmSync(join(this.templatesDir, `${safeFile(name)}.json`), { force: true });
   }
 
-  /** Remove a custom theme (built-ins and the active theme are protected). */
+  /**
+   * Remove a custom theme (the active theme is protected). Deleting a
+   * project override of a built-in reverts to the pristine built-in.
+   */
   deleteTheme(name: string, activeBase: string): void {
     if (!this.customThemes.has(name)) {
-      throw new Error(`"${name}" is not a custom theme (built-ins can't be deleted)`);
+      throw new Error(`"${name}" is not a custom theme (pristine built-ins can't be deleted)`);
     }
     if (name === activeBase) {
       throw new Error(`"${name}" is the deck's active theme — switch themes first`);
@@ -281,6 +292,9 @@ export class Library {
     this.customThemes.delete(name);
     delete THEMES[name];
     rmSync(join(this.themesDir, `${safeFile(name)}.json`), { force: true });
+    if ((BUILTIN_THEMES as readonly string[]).includes(name)) {
+      registerTheme(name === "corporate-bold" ? corporateBold : minimalistDark);
+    }
   }
 
   /** Full template documents (for visual galleries). */

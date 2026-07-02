@@ -70,7 +70,7 @@ interface ThemesResponse {
 const FONT_SIZE_KEYS = ["display", "h1", "h2", "body", "small", "metricValue", "metricLabel"] as const;
 const RADIUS_KEYS = ["none", "sm", "md"] as const;
 
-export function DesignTab({ onActivate }: { onActivate: (name: string) => void }) {
+export function DesignTab({ onActivate }: { onActivate: (name: string) => void | Promise<void> }) {
   const [data, setData] = useState<ThemesResponse | null>(null);
   const [draft, setDraft] = useState<ThemeTokens | null>(null);
   const [isNew, setIsNew] = useState(false);
@@ -94,13 +94,25 @@ export function DesignTab({ onActivate }: { onActivate: (name: string) => void }
 
   if (!data) return <div className="boot">Loading design systems…</div>;
 
-  const startEdit = (tokens: ThemeTokens, asCopy: boolean) => {
-    setDraft(
-      structuredClone(
-        asCopy ? { ...tokens, name: `${tokens.name}-copy` } : tokens,
-      ) as ThemeTokens,
-    );
-    setIsNew(asCopy);
+  const activate = async (name: string) => {
+    await onActivate(name);
+    // deck theme applies over WS; re-pull so the active badge follows
+    setTimeout(refresh, 300);
+  };
+
+  /** Edit any theme in place (editing a built-in saves a project override). */
+  const startEdit = (tokens: ThemeTokens) => {
+    setDraft(structuredClone(tokens) as ThemeTokens);
+    setIsNew(false);
+    setError(null);
+    setSaved(null);
+  };
+
+  /** New design system, seeded from the active theme's tokens. */
+  const startNew = () => {
+    const seed = data.themes.find((t) => t.name === data.active) ?? data.themes[0];
+    setDraft(structuredClone({ ...seed, name: "" }) as ThemeTokens);
+    setIsNew(true);
     setError(null);
     setSaved(null);
   };
@@ -224,19 +236,24 @@ export function DesignTab({ onActivate }: { onActivate: (name: string) => void }
     <div className="tab-body design-tab">
       <section className="theme-list">
         <h2>Design systems</h2>
+        <button className="primary new-ds" onClick={startNew}>
+          + New design system
+        </button>
         <p className="hint">
-          Activate to restyle the whole deck. Built-ins are read-only — duplicate one to make it
-          yours. Everything here is also available to the AI (get_design_system / register_theme).
+          Activate to restyle the whole deck. Edit anything — editing a built-in saves a project
+          override you can revert. Everything here is also available to the AI
+          (get_design_system / register_theme).
         </p>
         {data.themes.map((t) => {
           const isBuiltin = data.builtin.includes(t.name);
+          const isCustom = data.custom.includes(t.name);
           const isActive = data.active === t.name;
           return (
             <div key={t.name} className={`theme-card ${isActive ? "active" : ""}`}>
               <div className="theme-card-head">
                 <strong>{t.name}</strong>
                 {isActive && <span className="chip">active</span>}
-                {isBuiltin && <span className="mini">built-in</span>}
+                {isBuiltin && <span className="mini">{isCustom ? "built-in · edited" : "built-in"}</span>}
               </div>
               <div className="swatches">
                 {COLOR_ROLES.map((r) => (
@@ -247,12 +264,11 @@ export function DesignTab({ onActivate }: { onActivate: (name: string) => void }
                 {t.fonts.heading} headings · {t.fonts.body} body · h1 {t.fontSizes.h1}px
               </div>
               <div className="btn-row wrap">
-                {!isActive && <button onClick={() => onActivate(t.name)}>activate</button>}
-                <button onClick={() => startEdit(t, true)}>duplicate</button>
-                {!isBuiltin && <button onClick={() => startEdit(t, false)}>edit</button>}
-                {!isBuiltin && !isActive && (
+                {!isActive && <button onClick={() => activate(t.name)}>activate</button>}
+                <button onClick={() => startEdit(t)}>edit</button>
+                {isCustom && !isActive && (
                   <button className="danger" onClick={() => remove(t.name)}>
-                    delete
+                    {isBuiltin ? "revert" : "delete"}
                   </button>
                 )}
               </div>
@@ -268,6 +284,7 @@ export function DesignTab({ onActivate }: { onActivate: (name: string) => void }
           <input
             value={draft.name}
             disabled={!isNew}
+            placeholder="my-brand"
             onChange={(e) => set((d) => (d.name = e.target.value.trim()))}
           />
 
@@ -444,8 +461,8 @@ export function DesignTab({ onActivate }: { onActivate: (name: string) => void }
       ) : (
         <section className="theme-editor empty">
           <p className="hint">
-            Select <b>duplicate</b> (or <b>edit</b> on a custom system) to open the editor — every
-            token is adjustable, with a live preview.
+            Hit <b>+ New design system</b> to create your own, or <b>edit</b> any existing one —
+            every token is adjustable, with a live preview.
           </p>
         </section>
       )}

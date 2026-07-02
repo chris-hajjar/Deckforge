@@ -507,20 +507,36 @@ const page4 = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
 await page4.goto(BASE);
 await page4.waitForSelector(".slide-frame");
 
-// cycle design systems from the header
-const themeSelect = page4.locator(".theme-picker select");
-check("header cycler lists every design system", (await themeSelect.locator("option").count()) >= 3);
-await themeSelect.selectOption("atlas-brand");
-await page4.waitForTimeout(500);
-check(
-  "activating a custom design system restyles the deck",
-  await page4.locator("main .slide-frame").isVisible(),
-);
+// arrow keys step through slides
+const activeThumbIdx = () =>
+  page4.evaluate(() => [...document.querySelectorAll(".thumb")].findIndex((t) => t.classList.contains("active")));
+await page4.locator("main").click({ position: { x: 5, y: 5 } });
+const before4 = await activeThumbIdx();
+await page4.keyboard.press("ArrowRight");
+await page4.waitForTimeout(200);
+check("arrow keys navigate slides", (await activeThumbIdx()) === before4 + 1);
+await page4.keyboard.press("ArrowLeft");
 
-// Design systems tab
+// Design systems tab: activate a system, badge follows, deck survives round-trip
 await page4.getByRole("button", { name: "Design systems" }).click();
 await page4.waitForSelector(".theme-card");
 check("design tab lists theme cards", (await page4.locator(".theme-card").count()) >= 3);
+check("new-design-system entry point is obvious", await page4.getByRole("button", { name: "+ New design system" }).isVisible());
+await page4.locator(".theme-card", { hasText: "atlas-brand" }).getByRole("button", { name: "activate" }).click();
+await page4.waitForTimeout(700);
+check(
+  "activation moves the active badge",
+  await page4.locator(".theme-card.active", { hasText: "atlas-brand" }).isVisible(),
+);
+await page4.getByRole("button", { name: "Deck", exact: true }).click();
+await page4.waitForTimeout(400);
+const frameBox = await page4.locator("main .slide-frame").boundingBox();
+check(
+  "deck preview stays visible after a design-tab round trip",
+  !!frameBox && frameBox.width > 200 && frameBox.height > 100,
+);
+await page4.getByRole("button", { name: "Design systems" }).click();
+await page4.waitForSelector(".theme-card");
 await page4.locator(".theme-card", { hasText: "atlas-brand" }).getByRole("button", { name: "edit" }).click();
 await page4.waitForSelector(".theme-editor input[type=color]");
 check(

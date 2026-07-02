@@ -326,3 +326,17 @@ hr { border: none; border-top: 1px solid var(--line-soft); margin: 12px 0 4px; w
   resize: none; outline: none; z-index: 1;
 }
 .code-editor textarea::selection { background: rgba(43, 140, 255, 0.25); }
+
+/* stepper: −/+ number field */
+.stepper { display: flex; align-items: center; gap: 5px; }
+.stepper button { width: 28px; padding: 4px 0; font-weight: 700; flex-shrink: 0; }
+.stepper input[type="number"] {
+  width: 100%; text-align: center; background: #fff; border: 1px solid var(--line);
+  color: var(--text); border-radius: 9px; padding: 6px 4px; font-size: 13px;
+}
+.stepper input[type="number"]:focus { outline: none; border-color: var(--brand); }
+
+/* inspector fields never squish; text areas are user-resizable */
+.inspector > * { flex-shrink: 0; }
+.inspector textarea { resize: vertical; min-height: 72px; }
+.new-ds { width: 100%; padding: 9px; }

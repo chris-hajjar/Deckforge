@@ -24,18 +24,8 @@ export function App() {
   const [tab, setTab] = useState<Tab>("deck");
   const [sideTab, setSideTab] = useState<"inspect" | "code">("inspect");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [themeNames, setThemeNames] = useState<string[]>([]);
   const [templates, setTemplates] = useState<Array<{ name: string; description?: string }>>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  const fetchThemes = () =>
-    fetch("/api/themes")
-      .then((r) => r.json())
-      .then((d) => setThemeNames((d.themes ?? []).map((t: { name: string }) => t.name)))
-      .catch(() => {});
-  useEffect(() => {
-    fetchThemes();
-  }, [tab]);
 
   const fetchTemplates = () =>
     fetch("/api/templates")
@@ -67,16 +57,43 @@ export function App() {
   const mainRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.6);
 
+  // re-attach whenever the Deck tab (re)mounts — a stale observer after a
+  // tab round-trip left the preview with a bogus scale until refresh
   useEffect(() => {
     const el = mainRef.current;
     if (!el) return;
     const update = () =>
-      setScale(Math.min((el.clientWidth - 48) / 1280, (el.clientHeight - 80) / 720));
+      setScale(
+        Math.max(0.05, Math.min((el.clientWidth - 48) / 1280, (el.clientHeight - 80) / 720)),
+      );
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [state != null]);
+  }, [state != null, tab]);
+
+  // arrow keys step through slides (unless typing in a field)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (tab !== "deck" || presenting || !state) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
+        return;
+      }
+      const last = state.deck.slides.length - 1;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        setSlideIndex((i) => Math.min(last, i + 1));
+        setSelectedId(null);
+        e.preventDefault();
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        setSlideIndex((i) => Math.max(0, i - 1));
+        setSelectedId(null);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, presenting, state]);
 
   const warnings = useMemo(() => {
     if (!state) return [];
@@ -101,12 +118,6 @@ export function App() {
 
   const activateTheme = (name: string) =>
     sendPatches([{ op: "replace", path: "/theme", value: { base: name } }]);
-
-  const cycleTheme = () => {
-    if (themeNames.length < 2) return;
-    const i = themeNames.indexOf(deck.theme.base);
-    activateTheme(themeNames[(i + 1) % themeNames.length]);
-  };
 
   if (presenting) {
     return (
@@ -170,18 +181,6 @@ export function App() {
             sendPatches([{ op: "replace", path: "/title", value: e.target.value }])
           }
         />
-        <div className="theme-picker">
-          <select value={deck.theme.base} onChange={(e) => activateTheme(e.target.value)}>
-            {(themeNames.length ? themeNames : [deck.theme.base]).map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-          <button title="Cycle design systems" onClick={cycleTheme}>
-            ⟳
-          </button>
-        </div>
         <span className={`conn ${connected ? "on" : "off"}`}>
           {connected ? `live · rev ${rev}` : "reconnecting…"}
         </span>
