@@ -9,6 +9,7 @@
  * same live state, which is the whole point.
  */
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -35,7 +36,13 @@ const store = new DeckStore(join(projectDir, "deck.v2.json"));
 log(`deck: ${join(projectDir, "deck.v2.json")} (rev ${store.rev})`);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const canvasDist = resolve(here, "../../canvas/dist");
+// dev layout, then bundled (.mcpb) layout, then explicit override
+const canvasCandidates = [
+  process.env.DECKFORGE_CANVAS_DIST,
+  resolve(here, "../../canvas/dist"),
+  resolve(here, "canvas"),
+].filter((p): p is string => !!p);
+const canvasDist = canvasCandidates.find((p) => existsSync(join(p, "index.html"))) ?? canvasCandidates[1];
 const httpServer = createHttpServer(store, canvasDist, library);
 httpServer.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {

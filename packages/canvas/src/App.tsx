@@ -324,6 +324,7 @@ export function App() {
               hoveredId={hoveredId}
               selectedId={selectedId}
               sendPatches={sendPatches}
+              onSelectElement={setSelectedId}
             />
           )}
         </div>

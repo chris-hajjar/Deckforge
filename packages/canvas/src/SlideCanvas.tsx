@@ -161,8 +161,8 @@ export function SlideCanvas({
                 lineHeight: t.lineHeight,
                 color: t.color,
                 textAlign: t.align,
-                background: "rgba(176,101,66,0.08)",
-                border: "1px solid #b06542",
+                background: "rgba(43,140,255,0.10)",
+                border: "1px solid #2b8cff",
                 outline: "none",
                 resize: "none",
                 padding: 0,
@@ -195,9 +195,9 @@ export function SlideCanvas({
                   width: box.w * scale,
                   height: box.h * scale,
                   outline: isSelected
-                    ? "2px solid #b06542"
+                    ? "2px solid #2b8cff"
                     : hoveredId != null && box.nodeId === hoveredId
-                      ? "1.5px dashed rgba(176,101,66,0.65)"
+                      ? "1.5px dashed rgba(43,140,255,0.7)"
                       : undefined,
                   outlineOffset: 1,
                   cursor: overlayRoot ? "move" : "default",
@@ -227,7 +227,7 @@ export function SlideCanvas({
                   top: (box.y + box.h) * scale - 6,
                   width: 12,
                   height: 12,
-                  background: "#b06542",
+                  background: "#2b8cff",
                   borderRadius: 3,
                   cursor: "nwse-resize",
                   zIndex: 10,

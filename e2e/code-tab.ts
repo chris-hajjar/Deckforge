@@ -52,6 +52,24 @@ check(
   "applied code edit renders on the canvas",
   await page.locator("main .slide-frame").getByText(stamp).isVisible(),
 );
+// reverse direction: click inside a JSON block → element selected on canvas
+const value = await ta.inputValue();
+const idx = value.indexOf('"label": "ARR"');
+await ta.evaluate((el, i) => {
+  const t = el as HTMLTextAreaElement;
+  t.focus();
+  t.setSelectionRange(i, i);
+  t.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+}, idx);
+await page.waitForTimeout(300);
+const selectedOutline = await page.evaluate(() =>
+  [...document.querySelectorAll("main .slide-frame div")].some((d) => {
+    const st = (d as HTMLElement).style;
+    return st.outlineStyle === "solid" && st.outlineWidth === "2px";
+  }),
+);
+check("clicking a JSON block selects the element on canvas", selectedOutline);
+
 // bad JSON is rejected with a readable error, state untouched
 await ta.fill("{ definitely not json");
 await page.locator(".code-toolbar button", { hasText: "apply" }).click();

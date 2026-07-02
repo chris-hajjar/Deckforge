@@ -4,3 +4,4 @@ dist/
 *.log
 out/
 e2e/out/
+dist-mcpb/

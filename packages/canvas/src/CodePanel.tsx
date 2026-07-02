@@ -24,6 +24,8 @@ interface Props {
   hoveredId: string | null;
   selectedId: string | null;
   sendPatches: (patches: Operation[]) => void;
+  /** Reverse direction: caret inside a JSON block selects it on the canvas. */
+  onSelectElement?: (nodeId: string) => void;
 }
 
 /**
@@ -68,7 +70,7 @@ function elementRanges(text: string): Map<string, [number, number]> {
   return ranges;
 }
 
-export function CodePanel({ slide, slideIndex, hoveredId, selectedId, sendPatches }: Props) {
+export function CodePanel({ slide, slideIndex, hoveredId, selectedId, sendPatches, onSelectElement }: Props) {
   const canonical = useMemo(() => JSON.stringify(slide, null, 2), [slide]);
   const [text, setText] = useState(canonical);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +115,21 @@ export function CodePanel({ slide, slideIndex, hoveredId, selectedId, sendPatche
     setText(JSON.stringify(parsed, null, 2));
   };
 
+  /** Chrome-inspector reverse: the caret's enclosing element gets selected. */
+  const selectAtCaret = () => {
+    if (!ranges || !taRef.current || !onSelectElement) return;
+    const pos = taRef.current.selectionStart;
+    let best: string | null = null;
+    let bestLen = Infinity;
+    for (const [id, [s, e]] of ranges) {
+      if (s <= pos && pos < e && e - s < bestLen) {
+        best = id;
+        bestLen = e - s;
+      }
+    }
+    if (best) onSelectElement(best);
+  };
+
   const syncScroll = () => {
     if (taRef.current && preRef.current) {
       preRef.current.scrollTop = taRef.current.scrollTop;
@@ -152,6 +169,10 @@ export function CodePanel({ slide, slideIndex, hoveredId, selectedId, sendPatche
           spellCheck={false}
           onChange={(e) => setText(e.target.value)}
           onScroll={syncScroll}
+          onClick={selectAtCaret}
+          onKeyUp={(e) => {
+            if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") selectAtCaret();
+          }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") apply();
           }}

@@ -2,15 +2,15 @@
    the slide is the loudest thing on screen. */
 * { margin: 0; box-sizing: border-box; }
 :root {
-  --bg: #f2eee3;        /* eggshell page */
-  --panel: #faf8f1;     /* warm paper panels */
-  --panel-2: #f1ecdf;   /* recessed fields */
-  --line: #e2dbc8;      /* warm hairline */
-  --line-soft: #eae4d4;
+  --bg: #f8f7f2;        /* bright eggshell-white page */
+  --panel: #fdfcf9;     /* near-white panels */
+  --panel-2: #f1efe7;   /* recessed fields */
+  --line: #e6e2d6;      /* soft hairline */
+  --line-soft: #edeadf;
   --text: #33302a;      /* warm ink */
-  --muted: #8b8271;
-  --brand: #b06542;     /* clay */
-  --brand-deep: #96522f;
+  --muted: #8f887a;
+  --brand: #2b8cff;     /* bright happy blue */
+  --brand-deep: #146fe0;
   --good: #4e7d43;
   --warn-ink: #9a6a1f;
   --shadow-soft: 0 1px 2px rgba(70, 60, 40, 0.06), 0 8px 28px rgba(70, 60, 40, 0.1);
@@ -59,7 +59,7 @@ header {
   cursor: pointer; background: #fff; transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .thumb:hover { border-color: var(--muted); }
-.thumb.active { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(176, 101, 66, 0.18); }
+.thumb.active { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(43, 140, 255, 0.20); }
 .thumb-meta {
   display: flex; justify-content: space-between; align-items: center;
   padding: 4px 8px; background: var(--panel-2); font-size: 11px; color: var(--muted);
@@ -116,7 +116,7 @@ button {
   font-family: inherit;
 }
 button:hover { border-color: var(--muted); }
-button.active { border-color: var(--brand); color: var(--brand-deep); background: rgba(176, 101, 66, 0.08); font-weight: 600; }
+button.active { border-color: var(--brand); color: var(--brand-deep); background: rgba(43, 140, 255, 0.10); font-weight: 600; }
 button.danger { color: #a8442f; }
 button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
 button.primary:hover { background: var(--brand-deep); }
@@ -220,7 +220,7 @@ hr { border: none; border-top: 1px solid var(--line-soft); margin: 12px 0 4px; w
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .theme-card:hover { box-shadow: 0 2px 10px rgba(70, 60, 40, 0.07); }
-.theme-card.active { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(176, 101, 66, 0.15); }
+.theme-card.active { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(43, 140, 255, 0.16); }
 .theme-card-head { display: flex; align-items: center; gap: 8px; }
 .theme-editor { flex: 1; padding: 22px 26px; overflow-y: auto; max-width: 780px; }
 .theme-editor.empty { display: grid; place-items: center; }
@@ -314,15 +314,15 @@ hr { border: none; border-top: 1px solid var(--line-soft); margin: 12px 0 4px; w
   border: none; word-break: normal; overflow-wrap: normal;
 }
 .code-editor pre {
-  background: #fbfaf5; color: #4d4639; pointer-events: none; z-index: 0;
+  background: #fcfbf7; color: #4a463c; pointer-events: none; z-index: 0;
   border-top: 1px solid var(--line-soft);
 }
 .code-editor pre mark {
-  background: rgba(176, 101, 66, 0.16); color: inherit;
-  outline: 1px solid rgba(176, 101, 66, 0.35); border-radius: 2px;
+  background: rgba(43, 140, 255, 0.16); color: inherit;
+  outline: 1px solid rgba(43, 140, 255, 0.40); border-radius: 2px;
 }
 .code-editor textarea {
   background: transparent; color: transparent; caret-color: #33302a;
   resize: none; outline: none; z-index: 1;
 }
-.code-editor textarea::selection { background: rgba(176, 101, 66, 0.25); }
+.code-editor textarea::selection { background: rgba(43, 140, 255, 0.25); }
