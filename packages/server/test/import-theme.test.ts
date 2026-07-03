@@ -100,6 +100,40 @@ describe("theme-referenced imports", () => {
     expect((imported.slide as { background?: string }).background).toBe("#eeeeee");
   });
 
+  it("drops transparent scrims, maps arches/organic custGeom, swaps rotated frames", async () => {
+    const slide = `<?xml version="1.0"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+<p:cSld><p:spTree>
+  ${sp(`<p:spPr>${xfrm(0, 0, 9144000, 5143500)}<a:prstGeom prst="rect"/>
+    <a:solidFill><a:srgbClr val="000000"><a:alpha val="30000"/></a:srgbClr></a:solidFill></p:spPr>`)}
+  ${sp(`<p:spPr>${xfrm(914400, 914400, 1828800, 3657600)}<a:prstGeom prst="round2SameRect"/>
+    <a:solidFill><a:srgbClr val="AA5544"/></a:solidFill></p:spPr>`)}
+  ${sp(`<p:spPr>${xfrm(4572000, 914400, 1828800, 3657600)}
+    <a:custGeom><a:pathLst><a:path><a:moveTo/><a:cubicBezTo/><a:cubicBezTo/><a:cubicBezTo/><a:lnTo/><a:close/></a:path></a:pathLst></a:custGeom>
+    <a:solidFill><a:srgbClr val="112233"/></a:solidFill></p:spPr>`)}
+  ${sp(`<p:spPr><a:xfrm rot="5400000"><a:off x="914400" y="4572000"/><a:ext cx="1828800" cy="914400"/></a:xfrm>
+    <a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="445566"/></a:solidFill></p:spPr>`)}
+</p:spTree></p:cSld></p:sld>`;
+    const zip = new JSZip();
+    zip.file("ppt/slides/slide1.xml", slide);
+    const [imported] = await importPptx(await zip.generateAsync({ type: "nodebuffer" }));
+    const shapes = (imported.slide.overlays ?? []) as Array<{
+      shape?: string; fill?: string; frame: { w: number; h: number };
+    }>;
+
+    // 30%-alpha black scrim over the whole slide → dropped, not an opaque box
+    expect(shapes.some((s) => s.fill === "#000000")).toBe(false);
+    // arch preset (round2SameRect) → pill, the closest native geometry
+    expect(shapes.find((s) => s.fill === "#aa5544")?.shape).toBe("pill");
+    // curve-dominated tall custGeom → pill (not the old blanket rect)
+    expect(shapes.find((s) => s.fill === "#112233")?.shape).toBe("pill");
+    // 90° rotation (5400000/60000): 1828800×914400 EMU frame swaps to tall
+    const rotated = shapes.find((s) => s.fill === "#445566")!;
+    expect(rotated.frame.w).toBe(96);
+    expect(rotated.frame.h).toBe(192);
+  });
+
   it("keeps working without any theme part (literal-hex decks)", async () => {
     const zip = new JSZip();
     zip.file(

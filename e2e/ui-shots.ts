@@ -28,7 +28,30 @@ await page.waitForTimeout(400);
 await page.screenshot({ path: join(here, "out/ui-2-design.png") });
 await page.getByRole("button", { name: "Templates" }).click();
 await page.waitForSelector(".tpl-card");
+
+// multi-select: select all → bulk bar appears with the right count
+const cards = await page.locator(".tpl-card").count();
+await page.getByRole("button", { name: "select all" }).click();
+const count = await page.locator(".tpl-bulk .count").textContent();
+if (count !== `${cards} selected`) throw new Error(`bulk bar shows "${count}", expected "${cards} selected"`);
+if ((await page.locator(".tpl-card.sel").count()) !== cards) throw new Error("not all cards highlighted");
 await page.screenshot({ path: join(here, "out/ui-3-templates.png") });
+// uncheck one via its checkbox, count drops
+await page.locator(".tpl-check").first().click({ force: true });
+const count2 = await page.locator(".tpl-bulk .count").textContent();
+if (count2 !== `${cards - 1} selected`) throw new Error(`after uncheck: "${count2}"`);
+await page.getByRole("button", { name: "clear" }).click();
+if ((await page.locator(".tpl-card.sel").count()) !== 0) throw new Error("clear left cards selected");
+console.log(`  ✓ template multi-select (${cards} cards, select all / uncheck / clear)`);
+
+// google setup modal via right-click: exact redirect URI + copy affordance
+await page.locator(".google-btn").click({ button: "right" });
+await page.waitForSelector(".uri-row code");
+const uri = await page.locator(".uri-row code").textContent();
+if (uri !== "http://localhost:4820/api/google/callback") throw new Error(`modal shows URI "${uri}"`);
+await page.screenshot({ path: join(here, "out/ui-4-google-setup.png") });
+console.log("  ✓ google setup modal shows pinned redirect URI");
+
 await browser.close();
 srv.kill();
 console.log("shots done");

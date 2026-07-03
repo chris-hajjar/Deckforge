@@ -45,7 +45,7 @@ const canvasCandidates = [
 ].filter((p): p is string => !!p);
 const canvasDist = canvasCandidates.find((p) => existsSync(join(p, "index.html"))) ?? canvasCandidates[1];
 const google = new GoogleSlides(projectDir);
-const httpServer = createHttpServer(store, canvasDist, library, google);
+const httpServer = createHttpServer(store, canvasDist, library, google, port);
 httpServer.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
     log(`port ${port} is already in use — is another Deckforge running? (set DECKFORGE_PORT to change)`);

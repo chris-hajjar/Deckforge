@@ -12,9 +12,13 @@
  * them to the active brand tokens the moment a template is instantiated into
  * a deck — importing a foreign template effectively re-brands it.
  *
+ * Approximated: mostly-transparent fills are dropped (closer to the original
+ * than an opaque box), custom geometries map to the nearest preset by their
+ * path's curve/line mix, and near-90° rotations swap the frame's w/h.
+ *
  * Not imported (skipped with a note): charts, tables, gradients/pictures as
- * fills, WordArt, and master/layout inheritance (only what's on the slide
- * itself).
+ * fills, WordArt, free rotation, and master/layout inheritance (only what's
+ * on the slide itself).
  */
 import JSZip from "jszip";
 import { XMLParser } from "fast-xml-parser";
@@ -55,15 +59,26 @@ function frameOf(xfrm: unknown, t: Transform) {
   const off = get(xfrm, "a:off") as XmlNode | undefined;
   const ext = get(xfrm, "a:ext") as XmlNode | undefined;
   if (!off || !ext) return null;
-  const x = Number(off["@x"]);
-  const y = Number(off["@y"]);
-  const w = Number(ext["@cx"]);
-  const h = Number(ext["@cy"]);
+  let x = t.offX + Number(off["@x"]) * t.scaleX;
+  let y = t.offY + Number(off["@y"]) * t.scaleY;
+  let w = Number(ext["@cx"]) * t.scaleX;
+  let h = Number(ext["@cy"]) * t.scaleY;
+  // Frames can't rotate; a shape turned (near) sideways at least keeps its
+  // real footprint if we swap width/height around the center.
+  const rot = (((Number(get(xfrm, "@rot") ?? 0) / 60000) % 360) + 360) % 360;
+  const nearest = Math.round(rot / 90) * 90;
+  if (nearest === 90 || nearest === 270) {
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    [w, h] = [h, w];
+    x = cx - w / 2;
+    y = cy - h / 2;
+  }
   return {
-    x: Math.max(0, Math.min(CANVAS_W - 8, px(t.offX + x * t.scaleX))),
-    y: Math.max(0, Math.min(CANVAS_H - 8, px(t.offY + y * t.scaleY))),
-    w: Math.max(8, px(w * t.scaleX)),
-    h: Math.max(8, px(h * t.scaleY)),
+    x: Math.max(0, Math.min(CANVAS_W - 8, px(x))),
+    y: Math.max(0, Math.min(CANVAS_H - 8, px(y))),
+    w: Math.max(8, px(w)),
+    h: Math.max(8, px(h)),
   };
 }
 
@@ -113,14 +128,26 @@ function applyTransforms(hex: string, clrNode: XmlNode): string {
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/**
+ * Fill opacity of a color node. Frames can't be translucent, so callers drop
+ * mostly-transparent fills — a 30%-alpha scrim over a photo reads far closer
+ * to the original as "nothing" than as an opaque colored box.
+ */
+function alphaOf(clr: XmlNode): number {
+  const v = get(clr, "a:alpha", "@val");
+  return v !== undefined ? Number(v) / 100000 : 1;
+}
+
 /** Resolve any DrawingML color holder (srgbClr / schemeClr / sysClr). */
 function colorOf(holder: unknown, scheme: ColorScheme): string | undefined {
   const srgb = get(holder, "a:srgbClr") as XmlNode | undefined;
   if (srgb && typeof srgb["@val"] === "string") {
+    if (alphaOf(srgb) < 0.5) return undefined;
     return applyTransforms(`#${(srgb["@val"] as string).toLowerCase()}`, srgb);
   }
   const schemeClr = get(holder, "a:schemeClr") as XmlNode | undefined;
   if (schemeClr && typeof schemeClr["@val"] === "string") {
+    if (alphaOf(schemeClr) < 0.5) return undefined;
     const name = schemeClr["@val"] as string;
     const base = scheme[name] ?? scheme[SCHEME_ALIASES[name]];
     if (base) return applyTransforms(base, schemeClr);
@@ -160,7 +187,38 @@ const GEOM_MAP: Record<string, string> = {
   homePlate: "chevron",
   pill: "pill",
   line: "line",
+  // nearest-preset approximations for common designer-template geometries
+  round1Rect: "roundRect",
+  round2SameRect: "pill", // the "arch" — pill's semicircular caps are the closest fit
+  round2DiagRect: "roundRect",
+  snipRoundRect: "roundRect",
+  flowChartConnector: "ellipse",
+  donut: "ellipse",
+  blockArc: "ellipse",
+  pie: "ellipse",
+  chord: "ellipse",
+  arc: "ellipse",
+  teardrop: "ellipse",
+  halfFrame: "rect",
+  snip1Rect: "rect",
+  snip2SameRect: "rect",
 };
+
+/**
+ * Custom (hand-drawn) geometry: no preset name exists, but the path commands
+ * tell us whether it's curvy or angular. Curve-dominated organic blobs and
+ * arches read far better as ellipse/pill than as the old blanket "rect".
+ */
+function custGeomKind(spPr: XmlNode, frame: { w: number; h: number }): string | undefined {
+  const pathLst = get(spPr, "a:custGeom", "a:pathLst");
+  if (!pathLst) return undefined;
+  const src = JSON.stringify(pathLst);
+  const curves = (src.match(/a:(cubicBezTo|quadBezTo|arcTo)/g) ?? []).length;
+  const straights = (src.match(/a:lnTo/g) ?? []).length;
+  if (curves === 0) return "rect";
+  if (curves >= straights) return frame.h > frame.w * 1.4 ? "pill" : "ellipse";
+  return "roundRect";
+}
 
 interface ImportCtx {
   notes: string[];
@@ -263,8 +321,11 @@ function importShape(sp: XmlNode, t: Transform, ctx: ImportCtx): DeckNode | null
   }
 
   // shape (with optional label)
-  const geometry = (prst && GEOM_MAP[prst]) || "rect";
-  if (prst && !GEOM_MAP[prst]) ctx.notes.push(`geometry "${prst}" approximated as rect`);
+  let geometry = prst ? GEOM_MAP[prst] : custGeomKind(spPr, frame);
+  if (!geometry) {
+    geometry = "rect";
+    if (prst) ctx.notes.push(`geometry "${prst}" approximated as rect`);
+  }
   const node: Record<string, unknown> = {
     id: `imp-${ctx.seq++}`,
     type: "shape",

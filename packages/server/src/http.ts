@@ -21,6 +21,7 @@ export function createHttpServer(
   canvasDist: string,
   library: Library,
   google: GoogleSlides,
+  port = 4820,
 ): Server {
   const app = express();
   app.use(express.json({ limit: "4mb" }));
@@ -138,10 +139,14 @@ export function createHttpServer(
   );
 
   // ---------- Google Slides (OAuth like a normal app) ----------
-  const redirectUri = (req: { headers: { host?: string } }) =>
-    `http://${req.headers.host ?? "localhost:4820"}/api/google/callback`;
+  // Pinned (never derived from the Host header): users register EXACTLY this
+  // one URI on their OAuth client, and it matches whether the canvas was
+  // opened via localhost or 127.0.0.1.
+  const oauthRedirectUri = `http://localhost:${port}/api/google/callback`;
 
-  app.get("/api/google/status", (_req, res) => res.json(google.status()));
+  app.get("/api/google/status", (_req, res) =>
+    res.json({ ...google.status(), redirectUri: oauthRedirectUri }),
+  );
 
   app.post("/api/google/config", (req, res) => {
     try {
@@ -154,7 +159,7 @@ export function createHttpServer(
 
   app.get("/api/google/connect", (req, res) => {
     try {
-      res.redirect(google.authUrl(redirectUri(req)));
+      res.redirect(google.authUrl(oauthRedirectUri));
     } catch (e) {
       res.status(422).send((e as Error).message);
     }
@@ -165,7 +170,7 @@ export function createHttpServer(
       await google.handleCallback(
         String(req.query.code ?? ""),
         String(req.query.state ?? ""),
-        redirectUri(req),
+        oauthRedirectUri,
       );
       res.send(
         "<body style='font-family:sans-serif;display:grid;place-items:center;height:100vh'>" +

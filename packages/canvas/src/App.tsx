@@ -36,6 +36,21 @@ export function App() {
   const [templates, setTemplates] = useState<Array<{ name: string; description?: string }>>([]);
   const [googleSetup, setGoogleSetup] = useState(false);
   const [googleBusy, setGoogleBusy] = useState<string | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    redirectUri?: string;
+  } | null>(null);
+  const [copiedUri, setCopiedUri] = useState(false);
+
+  const openGoogleSetup = async () => {
+    const st = await fetch("/api/google/status")
+      .then((r) => r.json())
+      .catch(() => null);
+    setGoogleStatus(st);
+    setCopiedUri(false);
+    setGoogleSetup(true);
+  };
   const fileRef = useRef<HTMLInputElement>(null);
 
   const fetchTemplates = () =>
@@ -133,6 +148,8 @@ export function App() {
   const openInSlides = async () => {
     const st = await fetch("/api/google/status").then((r) => r.json());
     if (!st.configured) {
+      setGoogleStatus(st);
+      setCopiedUri(false);
       setGoogleSetup(true);
       return;
     }
@@ -226,7 +243,16 @@ export function App() {
         <button className="present-btn" onClick={() => setPresenting(true)}>
           ▶ Present
         </button>
-        <button className="present-btn google-btn" onClick={openInSlides} disabled={googleBusy != null} title="Upload the deck to your Google Drive as a native Slides file and open it">
+        <button
+          className="present-btn google-btn"
+          onClick={openInSlides}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            openGoogleSetup();
+          }}
+          disabled={googleBusy != null}
+          title="Upload the deck to your Google Drive as a native Slides file and open it. Right-click to review the setup or disconnect."
+        >
           {GOOGLE_G} {googleBusy ?? "Slides"}
         </button>
         <a className="export" href="/api/export.pptx">
@@ -234,7 +260,10 @@ export function App() {
         </a>
       </header>
 
-      {googleSetup && (
+      {googleSetup && (() => {
+        const redirectUri =
+          googleStatus?.redirectUri ?? "http://localhost:4820/api/google/callback";
+        return (
         <div className="modal-backdrop" onClick={() => setGoogleSetup(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>Connect Google Slides</h2>
@@ -246,9 +275,29 @@ export function App() {
               <li>Go to <b>console.cloud.google.com</b> → create (or pick) a project</li>
               <li>APIs &amp; Services → <b>Enable APIs</b> → enable <b>Google Drive API</b></li>
               <li>APIs &amp; Services → <b>OAuth consent screen</b> → External → add yourself as a test user</li>
-              <li>Credentials → <b>Create credentials → OAuth client ID</b> → type <b>Web application</b>, and add <code>http://localhost:4820/api/google/callback</code> as an authorized redirect URI</li>
-              <li>Paste the Client ID and Client Secret below</li>
+              <li>
+                Credentials → <b>Create credentials → OAuth client ID</b> → application type{" "}
+                <b>Web application</b> (⚠ not "Desktop app" — it can't register redirect URIs and
+                you'll get <code>redirect_uri_mismatch</code>)
+              </li>
+              <li>Under <b>Authorized redirect URIs</b>, add exactly:</li>
             </ol>
+            <div className="uri-row">
+              <code>{redirectUri}</code>
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(redirectUri);
+                  setCopiedUri(true);
+                }}
+              >
+                {copiedUri ? "✓ copied" : "copy"}
+              </button>
+            </div>
+            <p className="hint">
+              Google can take ~5 minutes to apply a newly added redirect URI — if sign-in shows{" "}
+              <code>redirect_uri_mismatch</code> right after saving, wait a bit and try again.
+              Then paste the Client ID and Client Secret below.
+            </p>
             <label>Client ID</label>
             <input id="g-client-id" placeholder="xxxxx.apps.googleusercontent.com" />
             <label>Client secret</label>
@@ -274,10 +323,30 @@ export function App() {
                 Save &amp; sign in
               </button>
               <button onClick={() => setGoogleSetup(false)}>cancel</button>
+              {googleStatus?.configured && (
+                <button
+                  className="danger"
+                  style={{ marginLeft: "auto" }}
+                  onClick={async () => {
+                    await fetch("/api/google/disconnect", { method: "POST" });
+                    setGoogleStatus(await fetch("/api/google/status").then((r) => r.json()));
+                    alert("Disconnected. The saved client stays configured; sign in again anytime.");
+                  }}
+                >
+                  disconnect account
+                </button>
+              )}
             </div>
+            {googleStatus?.configured && (
+              <p className="hint">
+                A client is already configured{googleStatus.connected ? " and an account is connected" : ""}.
+                Saving new credentials above replaces it.
+              </p>
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {tab === "design" && <DesignTab onActivate={activateTheme} />}
       {tab === "templates" && (

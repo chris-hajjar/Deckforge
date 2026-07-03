@@ -365,3 +365,23 @@ hr { border: none; border-top: 1px solid var(--line-soft); margin: 12px 0 4px; w
 .modal input:focus { outline: none; border-color: var(--brand); }
 .setup-steps { margin: 0 0 4px 18px; display: flex; flex-direction: column; gap: 4px; }
 .setup-steps code { background: var(--panel-2); padding: 1px 5px; border-radius: 5px; font-size: 11px; }
+.uri-row {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 4px 18px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px;
+}
+.uri-row code { font-size: 12px; flex: 1; word-break: break-all; user-select: all; }
+.uri-row button {
+  background: #fff; border: 1px solid var(--line); border-radius: 7px;
+  padding: 3px 9px; font-size: 11px; cursor: pointer; color: var(--text); white-space: nowrap;
+}
+.uri-row button:hover { border-color: var(--brand); color: var(--brand); }
+
+/* template multi-select */
+.tpl-bulk { display: inline-flex; align-items: center; gap: 8px; }
+.tpl-bulk .count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tpl-card { position: relative; }
+.tpl-card.sel { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(43, 140, 255, 0.25); }
+.tpl-check {
+  position: absolute; top: 10px; left: 10px; z-index: 5;
+  width: 20px; height: 20px; accent-color: var(--brand); cursor: pointer;
+}
